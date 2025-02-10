@@ -1,0 +1,15 @@
+[package]
+name = "hello-world"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hello-world-methods = { path = "methods" }
+risc0-zkvm = { version = "1.1.2" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ahash = "=0.8.11"
+
+[features]
+cuda = ["risc0-zkvm/cuda"]
+default = []
+prove = ["risc0-zkvm/prove"]

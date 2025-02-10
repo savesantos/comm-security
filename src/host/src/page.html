@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Axum App</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: left;
+            align-items: left;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(11, 50px);
+            grid-template-rows: repeat(11, 50px);
+            gap: 2px;
+        }
+
+        .cell {
+            width: 50px;
+            height: 50px;
+            background-color: white;
+            border: 1px solid #ccc;
+            cursor: pointer;
+        }
+
+        .cell_empty {
+            width: 50px;
+            height: 50px;
+            background-color: white;
+        }
+
+        .cell_x_label {
+            width: 50px;
+            height: 50px;
+            background-color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+        }
+
+        .cell_y_label {
+            width: 50px;
+            height: 50px;
+            background-color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+        }
+
+        form {
+            display: flex;
+            flex-direction: column;
+            width: 900px;
+        }
+
+        label {
+            display: flex;
+            align-items: center;
+        }
+
+        input {
+            margin-left: 10px;
+            margin-right: 10px;
+            width: 100px;
+        }
+
+        select {
+            margin-left: 10px;
+            margin-right: 10px;
+            width: 105px;
+        }
+
+        /* CSS */
+        .button-10 {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 6px 14px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
+            border-radius: 6px;
+            border: none;
+            color: #fff;
+            background: linear-gradient(180deg, #4B91F7 0%, #367AF6 100%);
+            background-origin: border-box;
+            box-shadow: 0px 0.5px 1.5px rgba(54, 122, 246, 0.25), inset 0px 0.8px 0px -0.25px rgba(255, 255, 255, 0.2);
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+            width: 80px;
+            margin-left: 30px;
+        }
+
+        .button-10:focus {
+            box-shadow: inset 0px 0.8px 0px -0.25px rgba(255, 255, 255, 0.2), 0px 0.5px 1.5px rgba(54, 122, 246, 0.25), 0px 0px 0px 3.5px rgba(58, 108, 217, 0.5);
+            outline: 0;
+        }
+
+        .button-10:disabled {
+            background: gray;
+            cursor: not-allowed;
+        }
+
+        .game {
+            margin-left: 30px;
+        }
+    </style>
+</head>
+
+<body>
+
+
+    <div class="grid">
+        <!-- JavaScript will populate the 10x10 grid -->
+    </div>
+
+    <script>
+        const gridContainer = document.querySelector('.grid');
+        const board = decodeURIComponent('{board}').split(',');
+        const shots = decodeURIComponent('{shots}').split(',');
+        // Create the 10x10 grid
+        const cell = document.createElement('div');
+        cell.classList.add('cell_empty');
+        gridContainer.appendChild(cell);
+        for (let i = 0; i < 10; i++) {
+            const cell = document.createElement('div');
+            cell.classList.add('cell_x_label');
+            cell.textContent = String.fromCharCode(65 + i);
+            gridContainer.appendChild(cell);
+        }
+        for (let i = 0; i < 100; i++) {
+            if (i % 10 === 0) {
+                const cell = document.createElement('div');
+                cell.classList.add('cell_y_label');
+                cell.textContent = i / 10;
+                gridContainer.appendChild(cell);
+            }
+            const cell = document.createElement('div');
+            cell.classList.add('cell');
+            if (board.includes(i.toString())) {
+                cell.style.backgroundColor = 'black';
+            } else if (shots.includes(i.toString())) {
+                cell.style.backgroundColor = 'red';
+            }
+            cell.addEventListener('click', () => {
+                // Toggle color between white and black
+                if (cell.style.backgroundColor === 'black') {
+                    cell.style.backgroundColor = 'red';
+                } else if (cell.style.backgroundColor === 'red') {
+                    cell.style.backgroundColor = 'white';
+                } else {
+                    cell.style.backgroundColor = 'black';
+                }
+            });
+            gridContainer.appendChild(cell);
+        }
+
+        function submitForm(event) {
+            //event.preventDefault();
+
+            document.body.style.cursor = "wait";
+            getBoard(event);
+            const form = document.querySelector('form');
+            //form.submit(); // Submit the form programmatically
+            setTimeout(() => {
+                const buttons = form.querySelectorAll('button[type="submit"]');
+                buttons.forEach(button => button.disabled = true);
+            }, 10); // Small delay (0 ms)
+        }
+
+        function getBoard(event) {
+            const form = document.querySelector('form');
+            const board = [];
+            const shots = [];
+            const cells = document.querySelectorAll('.cell');
+            cells.forEach((cell, index) => {
+                if (cell.style.backgroundColor === 'black') {
+                    board.push(index);
+                }
+                if (cell.style.backgroundColor === 'red') {
+                    shots.push(index);
+                }
+            });
+            form.querySelector('#board').value = encodeURIComponent(board.join(','));
+            form.querySelector('#shots').value = encodeURIComponent(shots.join(','));
+            const button = event.submitter;
+            if (button.value !== 'Join') {
+                form.querySelector('input[name="gameid"]').value = '{gameid}';
+                form.querySelector('input[name="fleet"]').value = '{fleetid}';
+            }
+        }
+    </script>
+
+    <div>
+        <form action="/submit" method="post" onsubmit="submitForm(event)">
+            <input type="hidden" name="board" id="board">
+            <input type="hidden" name="shots" id="shots">
+            <input type="hidden" name="random" id="random" value="{random}">
+            <label>
+                <button type="submit" class="button-10" name="button" value="Join">Join</button>
+                <input type="text" name="gameid" placeholder="Game ID">
+                <label for="Fleet">With </label>
+                <input type="text" name="fleetid" placeholder="Your Fleet's ID">
+            </label>
+            <label>
+                <button type="submit" class="button-10" name="button" value="Fire">Fire</button>
+                <input type="text" name="targetfleet" placeholder="Fleet's ID">
+                <label for="x">X: </label>
+                <input type="text" name="x" placeholder="[A-L]">
+                <label for="y">Y: </label>
+                <input type="text" name="y" placeholder="[0-9]">
+            </label>
+            <label>
+                <button type="submit" class="button-10" name="button" value="Report">Report</button>
+                <select id="report" name="report">
+                    <option value="hit">Hit</option>
+                    <option value="miss">Miss</option>
+                </select>
+                <label for="x">X: </label>
+                <input type="text" name="rx" placeholder="[A-L]">
+                <label for="y">Y: </label>
+                <input type="text" name="ry" placeholder="[0-9]">
+            </label>
+            <label>
+                <button type="submit" class="button-10" name="button" value="Wave">Wave</button>
+            </label>
+            <label>
+                <button type="submit" class="button-10" name="button" value="Win">Win</button>
+            </label>
+        </form>
+        <div class="game">
+            <p>{response_html}</p>
+        </div>
+    </div>
+
+</body>
+
+</html>

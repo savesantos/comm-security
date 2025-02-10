@@ -1,0 +1,17 @@
+[package]
+name = "host"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+methods = { path = "../methods" }
+risc0-zkvm = { version = "1.1.2" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+axum = "0.7.7"
+tokio = { version = "1.40.0", features = ["full"] }
+serde = { version = "1.0.210", features = ["derive"] }
+serde_derive = "1.0"
+fleetcore = { path = "../fleetcore" }
+reqwest = { version = "0.12.8", features = ["json"] }
+nanoid = "0.3"
+percent-encoding = "2.1"

@@ -1,0 +1,30 @@
+services:
+  player0:
+    image: player0
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    container_name: player0
+    #entrypoint: /bin/bash
+    ports:
+      - "3000:3000"
+      - "8000:8000"
+    volumes:
+      - .:/workspace:cached
+    command: sleep infinity
+  chain0:
+    image: chain0
+    build:
+      dockerfile: ./Dockerfile
+    container_name: chain0
+    #entrypoint: /bin/bash
+    ports:
+      - "3001:3001"
+    volumes:
+      - .:/workspace:cached
+    command: sleep infinity
+    # Uncomment the next four lines if you will use a ptrace-based debugger like C++, Go, and Rust.
+    # cap_add:
+    #   - SYS_PTRACE
+    # security_opt:
+    #   - seccomp:unconfined
