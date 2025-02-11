@@ -1,3 +1,8 @@
+// Remove the following 3 lines to enable compiler checkings
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(dead_code)]
+
 use axum::{
     extract::Extension,
     response::{sse::Event, Html, IntoResponse},
@@ -47,14 +52,7 @@ async fn main() {
     };
 
     // Build our application with a route
-    /// Creates a new `Router` instance and defines the routes for the application.
-    ///
-    /// The following routes are defined:
-    /// - `GET /`: Calls the `index` handler function.
-    /// - `GET /logs`: Calls the `logs` handler function.
-    /// - `POST /chain`: Calls the `smart_contract` handler function.
-    ///
-    /// Additionally, an `Extension` layer is added to the router with the provided `shared` state.
+
     let app = Router::new()
         .route("/", get(index))
         .route("/logs", get(logs))

@@ -1,10 +1,16 @@
+// Remove the following 3 lines to enable compiler checkings
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(dead_code)]
+
+use percent_encoding;
+use serde::{Deserialize,Serialize};
+mod game_actions;
+
 use fleetcore::{Command, CommunicationData};
 use std::error::Error;
-use percent_encoding;
 use risc0_zkvm::Receipt;
 use risc0_zkvm::{default_prover, ExecutorEnv};
-use serde::{Deserialize, Serialize};
-mod game_actions;
 
 pub use game_actions::{join_game, fire, report, wave, win};
 
@@ -24,6 +30,7 @@ async fn send_receipt(action: Command, receipt: Receipt) -> String {
         Err(_) => "Error sending receipt".to_string(),
     }
 }
+
 
 #[derive(Deserialize)]
 pub struct FormData {

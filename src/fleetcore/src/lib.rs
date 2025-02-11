@@ -35,7 +35,7 @@ pub struct CommunicationData {
 }
 
 // Struct to specify the  output journal for join, wave and win methods
-#[derive(Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Deserialize, PartialEq, Eq, Serialize, Default)]
 pub struct BaseJournal {
     pub gameid: String,
     pub fleet: String,
@@ -43,7 +43,7 @@ pub struct BaseJournal {
 }
 
 // Struct to specify the  output journal for fire method
-#[derive(Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Deserialize, PartialEq, Eq, Serialize, Default)]
 pub struct FireJournal {
     pub gameid: String,
     pub fleet: String,
@@ -53,7 +53,7 @@ pub struct FireJournal {
 }
 
 // Struct to specify the  output journal for report method
-#[derive(Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Deserialize, PartialEq, Eq, Serialize, Default)]
 pub struct ReportJournal {
     pub gameid: String,
     pub fleet: String,
