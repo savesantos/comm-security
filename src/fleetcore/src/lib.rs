@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use risc0_zkvm::{Receipt, sha::Digest};
+use risc0_zkvm::{Receipt, Digest};
 
 // Struct sent by the rust code for input on the methods join, wave and win
 // The struct is read by the zkvm code and the data is used to generate the output Journal

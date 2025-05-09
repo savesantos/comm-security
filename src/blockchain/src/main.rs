@@ -11,7 +11,7 @@ use axum::{
 };
 use futures::stream::StreamExt;
 use rand::{seq::IteratorRandom, SeedableRng};
-use risc0_zkvm::sha::Digest;
+use risc0_zkvm::Digest;
 use std::{
     collections::HashMap,
     error::Error,
