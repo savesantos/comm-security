@@ -154,21 +154,180 @@ fn handle_join(shared: &SharedData, input_data: &CommunicationData) -> String {
 }
 
 fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
-     // TO DO:
+    // Verify the receipt first
+    if input_data.receipt.verify(FIRE_ID).is_err() {
+        shared.tx.send("Attempting to fire with invalid receipt".to_string()).unwrap();
+        return "Could not verify receipt".to_string();
+    }
+    
+    // Decode the journal data from the receipt
+    let data: FireJournal = input_data.receipt.journal.decode().unwrap();
+    let mut gmap = shared.gmap.lock().unwrap();
+    
+    // Check if the game exists
+    let game = match gmap.get_mut(&data.gameid) {
+        Some(game) => game,
+        None => {
+            shared.tx.send(format!("Game {} not found", data.gameid)).unwrap();
+            return "Game not found".to_string();
+        }
+    };
+    
+    // Check if it's the player's turn to fire
+    if game.next_player != Some(data.fleet.clone()) {
+        shared.tx.send(format!("Not {}'s turn to fire", data.fleet)).unwrap();
+        return "Not your turn".to_string();
+    }
+    
+    // Check if the target player exists in the game
+    if !game.pmap.contains_key(&data.target) {
+        shared.tx.send(format!("Target {} not found in game", data.target)).unwrap();
+        return "Target not found".to_string();
+    }
+    
+    // Update game state - target player needs to report the result
+    game.next_player = None;
+    game.next_report = Some(data.target.clone());
+    
+    // Broadcast the fire action
+    shared.tx.send(format!("{} fired at {} at position {}", 
+        data.fleet, data.target, xy_pos(data.pos))).unwrap();
+    
     "OK".to_string()
 }
 
 fn handle_report(shared: &SharedData, input_data: &CommunicationData) -> String {
-    // TO DO:
+    // Verify the receipt
+    if input_data.receipt.verify(REPORT_ID).is_err() {
+        shared.tx.send("Attempting to report with invalid receipt".to_string()).unwrap();
+        return "Could not verify receipt".to_string();
+    }
+    
+    // Decode the journal data
+    let data: ReportJournal = input_data.receipt.journal.decode().unwrap();
+    let mut gmap = shared.gmap.lock().unwrap();
+    
+    // Check if the game exists
+    let game = match gmap.get_mut(&data.gameid) {
+        Some(game) => game,
+        None => {
+            shared.tx.send(format!("Game {} not found", data.gameid)).unwrap();
+            return "Game not found".to_string();
+        }
+    };
+    
+    // Check if it's this player's turn to report
+    if game.next_report != Some(data.fleet.clone()) {
+        shared.tx.send(format!("Not {}'s turn to report", data.fleet)).unwrap();
+        return "Not your turn to report".to_string();
+    }
+    
+    // Update player's board state
+    if let Some(player) = game.pmap.get_mut(&data.fleet) {
+        player.current_state = data.next_board;
+    }
+    
+    // Reset report flag and set the next player
+    game.next_report = None;
+    
+    // Choose a random player as the next to fire
+    let mut rng = shared.rng.lock().unwrap();
+    let players: Vec<&String> = game.pmap.keys().collect();
+    
+    if let Some(next_player) = players.iter().choose(&mut *rng) {
+        game.next_player = Some((*next_player).clone());
+    }
+    
+    // Broadcast the report result
+    let hit_status = if data.report == "hit" { "HIT" } else { "MISS" };
+    shared.tx.send(format!("{} reports {} at position {}", 
+        data.fleet, hit_status, xy_pos(data.pos))).unwrap();
+    
     "OK".to_string()
 }
 
 fn handle_wave(shared: &SharedData, input_data: &CommunicationData) -> String {
-    // TO DO:
+    // Verify receipt
+    if input_data.receipt.verify(WAVE_ID).is_err() {
+        shared.tx.send("Attempting to wave with invalid receipt".to_string()).unwrap();
+        return "Could not verify receipt".to_string();
+    }
+    
+    // Decode journal data
+    let data: BaseJournal = input_data.receipt.journal.decode().unwrap();
+    let mut gmap = shared.gmap.lock().unwrap();
+    
+    // Check if game exists
+    let game = match gmap.get_mut(&data.gameid) {
+        Some(game) => game,
+        None => {
+            shared.tx.send(format!("Game {} not found", data.gameid)).unwrap();
+            return "Game not found".to_string();
+        }
+    };
+    
+    // Check if player is in the game
+    if !game.pmap.contains_key(&data.fleet) {
+        shared.tx.send(format!("Player {} not in game {}", data.fleet, data.gameid)).unwrap();
+        return "Player not in game".to_string();
+    }
+    
+    // Check if it's the player's turn
+    if game.next_player != Some(data.fleet.clone()) {
+        shared.tx.send(format!("{} cannot wave when it's not their turn", data.fleet)).unwrap();
+        return "Not your turn to wave".to_string();
+    }
+    
+    // Choose the next player randomly
+    let mut rng = shared.rng.lock().unwrap();
+    let players: Vec<&String> = game.pmap.keys()
+        .filter(|k| **k != data.fleet)
+        .collect();
+    
+    if let Some(next_player) = players.iter().choose(&mut *rng) {
+        game.next_player = Some((*next_player).clone());
+    } else {
+        // If no other players, keep turn with current player
+        game.next_player = Some(data.fleet.clone());
+    }
+    
+    // Broadcast the wave action
+    shared.tx.send(format!("{} waves in game {}", data.fleet, data.gameid)).unwrap();
+    
     "OK".to_string()
 }
 
 fn handle_win(shared: &SharedData, input_data: &CommunicationData) -> String {
-    // TO DO:
+    // Verify receipt
+    if input_data.receipt.verify(WIN_ID).is_err() {
+        shared.tx.send("Attempting to claim win with invalid receipt".to_string()).unwrap();
+        return "Could not verify receipt".to_string();
+    }
+    
+    // Decode journal data
+    let data: BaseJournal = input_data.receipt.journal.decode().unwrap();
+    let mut gmap = shared.gmap.lock().unwrap();
+    
+    // Check if game exists
+    let game = match gmap.get(&data.gameid) {
+        Some(game) => game,
+        None => {
+            shared.tx.send(format!("Game {} not found", data.gameid)).unwrap();
+            return "Game not found".to_string();
+        }
+    };
+    
+    // Check if player is in the game
+    if !game.pmap.contains_key(&data.fleet) {
+        shared.tx.send(format!("Player {} not in game {}", data.fleet, data.gameid)).unwrap();
+        return "Player not in game".to_string();
+    }
+    
+    // Remove the game from the map since it's over
+    gmap.remove(&data.gameid);
+    
+    // Broadcast the win
+    shared.tx.send(format!("{} claims victory in game {}!", data.fleet, data.gameid)).unwrap();
+    
     "OK".to_string()
 }
