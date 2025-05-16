@@ -261,16 +261,11 @@ fn handle_report(shared: &SharedData, input_data: &CommunicationData) -> String 
     // Reset report flag and set the next player
     game.next_report = None;
 
-    // Choose a random player as the next to fire
-    let mut rng = shared.rng.lock().unwrap();
-    let players: Vec<&String> = game.pmap.keys().collect();
-
-    if let Some(next_player) = players.iter().choose(&mut *rng) {
-        game.next_player = Some((*next_player).clone());
-    }
+    // Give the turn to the player who just reported (the one who was shot at)
+    game.next_player = Some(data.fleet.clone());
 
     // Broadcast the report result
-    let hit_status = if data.report == "hit" { "HIT" } else { "MISS" };
+    let hit_status = if data.report == "Hit" { "HIT" } else { "MISS" };
     shared
         .tx
         .send(format!(
