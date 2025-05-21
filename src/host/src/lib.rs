@@ -17,7 +17,7 @@ pub use game_actions::{join_game, fire, report, wave, win};
 async fn send_receipt(action: Command, receipt: Receipt) -> String {
     let client = reqwest::Client::new();
     let res = client
-    .post("http://chain:3001/chain")
+    .post("http://chain0:3001/chain")
     .json(&CommunicationData {
         cmd: action,
         receipt,
