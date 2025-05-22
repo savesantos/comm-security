@@ -29,6 +29,7 @@ fn process_input_data(input_data: FormData) -> FormData {
     }
 }
 
+#[axum::debug_handler]
 async fn submit(Form(input_data): Form<FormData>) -> Html<String> {
     let gameid = input_data.gameid.clone();
     let fleetid = input_data.fleetid.clone();

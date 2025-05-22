@@ -1,213 +1,153 @@
 use fleetcore::{BaseInputs, BaseJournal};
-use risc0_zkvm::guest::env; // Make sure env is imported for logging
+use risc0_zkvm::guest::env;
 use risc0_zkvm::Digest;
 use sha2::{Digest as _, Sha256};
-use std::collections::HashMap;
+use std::collections::HashSet;
 
-// Function to validate fleet placement
-fn validate_fleet_placement(board_indices: &Vec<u8>) {
-    env::log(&format!(
-        "Validating fleet. Received cell count: {}, Expected: {}",
-        board_indices.len(),
-        EXPECTED_TOTAL_CELLS
-    )); // Added log
-    const EXPECTED_TOTAL_CELLS: usize = 18;
-    let expected_ship_counts: HashMap<usize, usize> = [
-        (1, 2), // 2 Submarines
-        (2, 2), // 2 Cruisers
-        (3, 1), // 1 Destroyer
-        (4, 1), // 1 Battleship
-        (5, 1), // 1 Carrier
-    ]
-    .iter()
-    .cloned()
-    .collect();
+fn validate_fleet_placement(board: &[u8]) -> Result<(), String> {
+    // Expected ship sizes: 2 submarines (size 1), 2 cruisers (size 2), 
+    // 1 destroyer (size 3), 1 battleship (size 4), 1 carrier (size 5)
+    let expected_ships = vec![1, 1, 2, 2, 3, 4, 5];
+    let total_squares = expected_ships.iter().sum::<i32>(); // Should be 18
 
-    // 1. Check total number of cells
-    if board_indices.len() != EXPECTED_TOTAL_CELLS {
-        panic!(
-            "Invalid fleet: expected {} occupied cells, found {}",
-            EXPECTED_TOTAL_CELLS,
-            board_indices.len()
-        );
+    // Check if board has the correct number of squares
+    if board.len() != total_squares as usize {
+        return Err(format!("Invalid number of ship squares: expected {}, got {}", 
+                         total_squares, board.len()));
     }
 
-    let mut sorted_board = board_indices.clone();
-    sorted_board.sort_unstable();
-
-    // 2. Check for duplicate or out-of-bounds cell indices
-    if sorted_board.is_empty() && EXPECTED_TOTAL_CELLS > 0 { // Should be caught by len check if EXPECTED_TOTAL_CELLS > 0
-        panic!("Invalid fleet: board is empty.");
-    }
-    if !sorted_board.is_empty() {
-        if sorted_board.last().map_or(false, |&idx| idx >= 100) {
-             panic!("Invalid fleet: cell index out of bounds (must be 0-99).");
-        }
-        for i in 0..sorted_board.len() - 1 {
-            if sorted_board[i] == sorted_board[i+1] {
-                panic!("Invalid fleet: duplicate cell index {} found.", sorted_board[i]);
-            }
-            if sorted_board[i] >= 100 { // Should be caught by last element check too
-                 panic!("Invalid fleet: cell index {} is out of bounds (0-99).", sorted_board[i]);
-            }
-        }
+    // Check for duplicate squares
+    let unique_squares: HashSet<_> = board.iter().collect();
+    if unique_squares.len() != board.len() {
+        return Err("Duplicate squares found".to_string());
     }
 
+    // Check if all squares are within the valid range (0-99)
+    if board.iter().any(|&sq| sq > 99) {
+        return Err("Invalid square coordinates".to_string());
+    }
 
-    let mut visited_mask = [false; 100];
-    let mut found_ships_counts: HashMap<usize, usize> = HashMap::new();
+    // Find all ships by looking for connected squares
+    let mut remaining_squares: HashSet<u8> = board.iter().copied().collect();
+    let mut ships = Vec::new();
 
-    for &cell_idx_u8 in &sorted_board {
-        let cell_idx = cell_idx_u8 as usize;
-        if visited_mask[cell_idx] {
-            continue;
-        }
-
-        let r = cell_idx / 10;
-        let c = cell_idx % 10;
-
-        // Determine max possible horizontal length from (r,c)
-        let mut horizontal_len = 1;
-        for l in 1..5 { // Max ship length 5, so check 4 more cells
-            let next_c = c + l;
-            if next_c >= 10 { break; }
-            if sorted_board.binary_search(&((r * 10 + next_c) as u8)).is_ok() {
-                horizontal_len += 1;
-            } else {
-                break;
-            }
-        }
-
-        // Determine max possible vertical length from (r,c)
-        let mut vertical_len = 1;
-        for l in 1..5 { // Max ship length 5, so check 4 more cells
-            let next_r = r + l;
-            if next_r >= 10 { break; }
-            if sorted_board.binary_search(&(((next_r) * 10 + c) as u8)).is_ok() {
-                vertical_len += 1;
-            } else {
-                break;
-            }
-        }
+    while !remaining_squares.is_empty() {
+        // Start with any remaining square
+        let start = *remaining_squares.iter().next().unwrap();
+        let mut ship = vec![start];
+        remaining_squares.remove(&start);
         
-        let actual_ship_len;
-        let is_horizontal;
-
-        // 3. Check for L-shapes (ships must be straight lines)
-        if horizontal_len > 1 && vertical_len > 1 {
-            panic!("Invalid ship shape at ({},{}): ships must be straight lines.", r, c);
-        } else if horizontal_len >= vertical_len { // Prioritize horizontal if equal or greater
-            actual_ship_len = horizontal_len;
-            is_horizontal = true;
-        } else { // vertical_len > horizontal_len
-            actual_ship_len = vertical_len;
-            is_horizontal = false;
-        }
+        // Keep track of squares to check
+        let mut to_check = vec![start];
         
-        if actual_ship_len == 0 || actual_ship_len > 5 {
-             panic!("Invalid ship length {} (max 5) for ship starting at ({},{}).", actual_ship_len, r, c);
-        }
-
-        // 4. Mark cells of this ship as visited and check for overlaps
-        for i in 0..actual_ship_len {
-            let current_ship_part_idx = if is_horizontal {
-                r * 10 + (c + i)
-            } else {
-                (r + i) * 10 + c
-            };
+        while !to_check.is_empty() {
+            let current = to_check.pop().unwrap();
             
-            // This check ensures the cell is part of the original board input.
-            // (already implicitly handled by how horizontal_len/vertical_len are calculated)
-            if sorted_board.binary_search(&(current_ship_part_idx as u8)).is_err() {
-                 panic!("Logic error: ship part ({},{}) not in original board.", current_ship_part_idx/10, current_ship_part_idx%10);
-            }
-
-            if visited_mask[current_ship_part_idx] {
-                 // This cell was already part of another ship, meaning an overlap.
-                 // Since cell_idx itself was unvisited, this implies i > 0.
-                 panic!("Overlapping ships detected at cell ({},{}).", current_ship_part_idx/10, current_ship_part_idx%10);
-            }
-            visited_mask[current_ship_part_idx] = true;
-        }
-        *found_ships_counts.entry(actual_ship_len).or_insert(0) += 1;
-    }
-    
-    // Sanity check: all cells from input board must be visited
-    for &cell_idx_u8 in &sorted_board {
-        if !visited_mask[cell_idx_u8 as usize] {
-            panic!("Cell {} ({},{}) was in input but not part of any identified ship.", cell_idx_u8, cell_idx_u8/10, cell_idx_u8%10);
-        }
-    }
-    
-    // 5. Compare found ship counts with expected counts
-    let mut all_counts_match = true;
-    let mut error_details = String::new();
-
-    for (len, expected_count) in &expected_ship_counts {
-        match found_ships_counts.get(len) {
-            Some(found_count) => {
-                if found_count != expected_count {
-                    all_counts_match = false;
-                    let detail = format!("Length {}: expected {}, found {}. ", len, expected_count, found_count);
-                    error_details.push_str(&detail);
-                    env::log(&detail); // Log mismatch
-                }
-            }
-            None => {
-                if *expected_count > 0 {
-                    all_counts_match = false;
-                    let detail = format!("Length {}: expected {}, found 0. ", len, expected_count);
-                    error_details.push_str(&detail);
-                    env::log(&detail); // Log missing ships
+            // Check adjacent squares (up, down, left, right)
+            let possible_adjacent = [
+                // Up (if not on top row)
+                if current >= 10 { Some(current - 10) } else { None },
+                // Down (if not on bottom row)
+                if current < 90 { Some(current + 10) } else { None },
+                // Left (if not on leftmost column)
+                if current % 10 != 0 { Some(current - 1) } else { None },
+                // Right (if not on rightmost column)
+                if current % 10 != 9 { Some(current + 1) } else { None },
+            ];
+            
+            for adj in possible_adjacent.iter().flatten() {
+                if remaining_squares.contains(adj) {
+                    ship.push(*adj);
+                    remaining_squares.remove(adj);
+                    to_check.push(*adj);
                 }
             }
         }
+        
+        // Add ship to the list
+        ships.push(ship);
     }
 
-    for (len, found_count) in &found_ships_counts {
-        if !expected_ship_counts.contains_key(len) && *found_count > 0 {
-            all_counts_match = false;
-            let detail = format!("Unexpected ships of length {}: found {}. ", len, found_count);
-            error_details.push_str(&detail);
-            env::log(&detail); // Log unexpected ships
+    // Check if we have the right ships
+    let mut ship_sizes: Vec<_> = ships.iter().map(|ship| ship.len() as i32).collect();
+    ship_sizes.sort_unstable();
+    
+    if ship_sizes != expected_ships {
+        return Err(format!("Invalid ship configuration: expected {:?}, got {:?}", 
+                         expected_ships, ship_sizes));
+    }
+
+    // Validate ship shapes (must be straight lines)
+    for ship in &ships {
+        if ship.len() > 1 {
+            let is_horizontal = ship.iter().all(|&sq| sq / 10 == ship[0] / 10);
+            let is_vertical = ship.iter().all(|&sq| sq % 10 == ship[0] % 10);
+            
+            if !is_horizontal && !is_vertical {
+                return Err("Ships must be straight lines".to_string());
+            }
+            
+            // Check if the ship is contiguous
+            if is_horizontal {
+                let mut ship_coords: Vec<_> = ship.iter().map(|&sq| sq % 10).collect();
+                ship_coords.sort_unstable();
+                
+                for i in 1..ship_coords.len() {
+                    if ship_coords[i] != ship_coords[i-1] + 1 {
+                        return Err("Ship has gaps".to_string());
+                    }
+                }
+            } else { // is_vertical
+                let mut ship_coords: Vec<_> = ship.iter().map(|&sq| sq / 10).collect();
+                ship_coords.sort_unstable();
+                
+                for i in 1..ship_coords.len() {
+                    if ship_coords[i] != ship_coords[i-1] + 1 {
+                        return Err("Ship has gaps".to_string());
+                    }
+                }
+            }
         }
     }
 
-    if !all_counts_match {
-        env::log(&format!("Incorrect fleet composition: {}", error_details)); // Log before panic
-        panic!("Incorrect fleet composition: {}", error_details);
-    }
+    Ok(())
 }
 
 fn main() {
-
     // read the input
-    let _input: BaseInputs = env::read();
-    // TODO: do something with the input
+    let mut _input: BaseInputs = env::read();
     let gameid = _input.gameid.clone();
     let fleet = _input.fleet.clone();
-    let board = _input.board.clone(); // This is Vec<u8>
+    let board = _input.board.clone();
     let random = _input.random.clone();
+    
+    // Validate the fleet placement 
+    if board.len() < 18 {
+        panic!("VALIDATION ERROR: Not enough squares");
+    }
+    // Now attempt the full validation
+    match validate_fleet_placement(&board) {
+        Ok(_) => {
+            // Encrypt the fleet position by hashing the board with a nonce (random)
+            let mut hasher = Sha256::new();
+            hasher.update(&board);
+            hasher.update(random.as_bytes());
+            let sha2_digest_output = hasher.finalize();
 
-    // Validate the fleet placement
-    validate_fleet_placement(&board); // Call the validation function
+            // Convert the SHA256 hash to a risc0_zkvm::Digest
+            let committed_board_hash = risc0_zkvm::Digest::from(<[u8; 32]>::from(sha2_digest_output));
 
-    // Encrypt the fleet position by hashing the board with a nonce (random)
-    let mut hasher = Sha256::new();
-    hasher.update(&board); // Hash the original board indices for commitment
-    hasher.update(random.as_bytes());
-    let sha2_digest_output = hasher.finalize();
+            // create the output
+            let output = BaseJournal {
+                gameid: gameid,
+                fleet: fleet,
+                board: committed_board_hash,
+            };
 
-    // Convert the SHA256 hash to a risc0_zkvm::Digest
-    let committed_board_hash = risc0_zkvm::Digest::from(<[u8; 32]>::from(sha2_digest_output));
-
-    // create the output
-    let output = BaseJournal {
-        gameid: gameid,
-        fleet: fleet,
-        board: committed_board_hash,
-    };
-
-    env::commit(&output);
+            // Successfully commit the output
+            env::commit(&output);
+        },
+        Err(err) => panic!("VALIDATION ERROR: {}", err),
+    }
 }
 

@@ -14,7 +14,6 @@ pub async fn join_game(idata: FormData) -> String {
         Err(err) => return err,
     };
 
-    // TO DO: Rebuild the receipt
     let base_inputs = BaseInputs {
         gameid: gameid.clone(),
         fleet: fleetid.clone(),
@@ -22,9 +21,10 @@ pub async fn join_game(idata: FormData) -> String {
         random: random.clone(),
     };
 
-    let receipt = generate_receipt_for_base_inputs(base_inputs, JOIN_ELF);
-
-    send_receipt(Command::Join, receipt).await
+    match generate_receipt_for_base_inputs(base_inputs, JOIN_ELF) {
+        Ok(receipt) => send_receipt(Command::Join, receipt).await,
+        Err(e) => format!("Invalid fleet placement. Please check your fleet and try again. Must have 5 ships: 1x5, 2x4, 3x3, 4x2, 5x1 (number x size)."),
+    }
 }
 
 pub async fn fire(idata: FormData) -> String {

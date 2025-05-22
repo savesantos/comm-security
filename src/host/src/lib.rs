@@ -15,19 +15,18 @@ use std::error::Error;
 pub use game_actions::{fire, join_game, report, wave, win};
 
 // Add this helper function to isolate the non-Send types
-fn generate_receipt_for_base_inputs(base_inputs: BaseInputs, elf: &[u8]) -> Receipt {
+fn generate_receipt_for_base_inputs(
+    base_inputs: BaseInputs,
+    elf: &[u8],
+) -> Result<Receipt, Box<dyn Error + Send + Sync>> {
     let env = ExecutorEnv::builder()
-        .write(&base_inputs)
-        .unwrap()
-        .build()
-        .unwrap();
+        .write(&base_inputs)?
+        .build()?;
 
-    // Get the default prover
     let prover = default_prover();
-
-    // Produce a receipt
-    prover.prove(env, elf).unwrap().receipt
+    Ok(prover.prove(env, elf)?.receipt)
 }
+
 
 async fn send_receipt(action: Command, receipt: Receipt) -> String {
     let client = reqwest::Client::new();
