@@ -5,7 +5,7 @@ use methods::{FIRE_ELF, JOIN_ELF, REPORT_ELF, WAVE_ELF, WIN_ELF};
 
 use crate::{
     generate_receipt_for_base_inputs, send_receipt, unmarshal_data, unmarshal_fire,
-    unmarshal_report, FormData,
+    unmarshal_report, FormData, generate_receipt_for_fire_inputs,
 };
 
 pub async fn join_game(idata: FormData) -> String {
@@ -32,11 +32,24 @@ pub async fn fire(idata: FormData) -> String {
         Ok(values) => values,
         Err(err) => return err,
     };
+
+    // Calculate the position from x and y (matches the reverse formula in xy_pos method in blockchain)
+    let pos = y * 10 + x;
+
     // TO DO: Rebuild the receipt
-    // Uncomment the following line when you are ready to send the receipt
-    //send_receipt(Command::Fire, receipt).await
-    // Comment out the following line when you are ready to send the receipt
-    "OK".to_string()
+    let fire_inputs = FireInputs {
+        gameid: gameid.clone(),
+        fleet: fleetid.clone(),
+        board: board.clone(),
+        random: random.clone(),
+        target: targetfleet.clone(),
+        pos: pos,
+    }
+
+    match generate_receipt_for_fire_inputs(fire_inputs, FIRE_ELF) {
+        Ok(receipt) => send_receipt(Command::Fire, receipt).await,
+        Err(e) => format!("Error creating fire receipt: {}.", e),
+    }
 }
 
 pub async fn report(idata: FormData) -> String {

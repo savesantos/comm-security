@@ -145,7 +145,7 @@ fn handle_join(shared: &SharedData, input_data: &CommunicationData) -> String {
         current_state: data.board.clone(),
     }).name == data.fleet;
     let mesg = if player_inserted {
-        format!("Joined game {}", data.gameid)
+        format!("{} joined game {}", data.fleet, data.gameid)
     } else {
         format!("Player already in game {}", data.gameid)
     };
@@ -155,6 +155,80 @@ fn handle_join(shared: &SharedData, input_data: &CommunicationData) -> String {
 
 fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
      // TO DO:
+    // Check validity of receipt
+    if input_data.receipt.verify(FIRE_ID).is_err() {
+        shared.tx.send("Attempting to fire with invalid receipt".to_string()).unwrap();
+        return "Could not verify receipt".to_string();
+    }
+
+    // Decode the journal
+    let data: FireJournal = input_data.receipt.journal.decode().unwrap();
+    let mut gmap = shared.gmap.lock().unwrap();
+
+    // Check if the game exists
+    let game = match gmap.get_mut(&data.gameid) {
+        Some(game) => game,
+        None => {
+            shared.tx.send(format!("Game {} not found", data.gameid)).unwrap();
+            return "Game not found".to_string();
+        }
+    };
+
+    // Check if the player is in the game
+    let player = match game.pmap.get_mut(&data.fleet) {
+        Some(player) => player,
+        None => {
+            shared.tx.send(format!("Player {} not found in game {}", data.fleet, data.gameid)).unwrap();
+            return "Player not found".to_string();
+        }
+    };
+
+    // Check if it's the player's turn
+    if game.next_player.as_ref() != Some(&data.fleet) {
+        shared.tx.send(format!("Not {}'s turn in game {}", data.fleet, data.gameid)).unwrap();
+        return "Not your turn".to_string();
+    }
+
+    // Check if someone has yet to report, including the player
+    if game.next_report.is_some() {
+        shared.tx.send(format!("Cannot fire until player {} has reported in game {}", game.next_report.as_ref().unwrap(), data.gameid)).unwrap();
+        return format!("Cannot fire until player {} has reported", game.next_report.as_ref().unwrap()).to_string();
+    }
+
+    // Check if the target position is valid
+    if 0 > data.pos || data.pos > 99 {
+        shared.tx.send(format!("Invalid target position {} in game {}", xy_pos(data.pos), data.gameid)).unwrap();
+        return "Invalid target position".to_string();
+    }
+
+    // Check if the target is not the player itself
+    if data.fleet == data.target {
+        shared.tx.send(format!("Cannot fire at yourself in game {}", data.gameid)).unwrap();
+        return "Cannot fire at yourself".to_string();
+    }
+
+    // Check if the target is in the game
+    if !game.pmap.contains_key(&data.target) {
+        shared.tx.send(format!("Target {} not found in game {}", data.target, data.gameid)).unwrap();
+        return "Target not found".to_string();
+    }
+
+    // Update who needs to report to the player that was just fired at
+    game.next_report = Some(data.target.clone());
+    
+    // Update the next player
+    game.next_player = None;
+    
+    // Send a message about the successful shot
+    let msg  = format!(
+        "{} fired at {} in game {} at position {}",
+        data.fleet,
+        data.target,
+        data.gameid,
+        xy_pos(data.pos)
+    );
+    shared.tx.send(msg).unwrap();
+    
     "OK".to_string()
 }
 

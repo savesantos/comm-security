@@ -14,13 +14,24 @@ use std::error::Error;
 
 pub use game_actions::{fire, join_game, report, wave, win};
 
-// Add this helper function to isolate the non-Send types
 fn generate_receipt_for_base_inputs(
     base_inputs: BaseInputs,
     elf: &[u8],
 ) -> Result<Receipt, Box<dyn Error + Send + Sync>> {
     let env = ExecutorEnv::builder()
         .write(&base_inputs)?
+        .build()?;
+
+    let prover = default_prover();
+    Ok(prover.prove(env, elf)?.receipt)
+}
+
+fn generate_receipt_for_fire_inputs(
+    fire_inputs: FireInputs,
+    elf: &[u8],
+) -> Result<Receipt, Box<dyn Error + Send + Sync>> {
+    let env = ExecutorEnv::builder()
+        .write(&fire_inputs)?
         .build()?;
 
     let prover = default_prover();
