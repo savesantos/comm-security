@@ -36,7 +36,6 @@ pub async fn fire(idata: FormData) -> String {
     // Calculate the position from x and y (matches the reverse formula in xy_pos method in blockchain)
     let pos = y * 10 + x;
 
-    // TO DO: Rebuild the receipt
     let fire_inputs = FireInputs {
         gameid: gameid.clone(),
         fleet: fleetid.clone(),
