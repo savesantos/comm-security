@@ -7,7 +7,7 @@ use percent_encoding;
 use serde::{Deserialize, Serialize};
 mod game_actions;
 
-use fleetcore::{BaseInputs, Command, CommunicationData};
+use fleetcore::{BaseInputs, Command, CommunicationData, FireInputs};
 use risc0_zkvm::Receipt;
 use risc0_zkvm::{default_prover, ExecutorEnv};
 use std::error::Error;

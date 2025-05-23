@@ -44,7 +44,7 @@ pub async fn fire(idata: FormData) -> String {
         random: random.clone(),
         target: targetfleet.clone(),
         pos: pos,
-    }
+    };
 
     match generate_receipt_for_fire_inputs(fire_inputs, FIRE_ELF) {
         Ok(receipt) => send_receipt(Command::Fire, receipt).await,

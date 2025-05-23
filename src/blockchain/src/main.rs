@@ -154,7 +154,6 @@ fn handle_join(shared: &SharedData, input_data: &CommunicationData) -> String {
 }
 
 fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
-     // TO DO:
     // Check validity of receipt
     if input_data.receipt.verify(FIRE_ID).is_err() {
         shared.tx.send("Attempting to fire with invalid receipt".to_string()).unwrap();
@@ -196,7 +195,7 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
     }
 
     // Check if the target position is valid
-    if 0 > data.pos || data.pos > 99 {
+    if data.pos > 99 {
         shared.tx.send(format!("Invalid target position {} in game {}", xy_pos(data.pos), data.gameid)).unwrap();
         return "Invalid target position".to_string();
     }
@@ -216,7 +215,7 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
     // Update who needs to report to the player that was just fired at
     game.next_report = Some(data.target.clone());
     
-    // Update the next player
+    // Update the next player (next_player will be attributed to the player that was just fired at after they report)
     game.next_player = None;
     
     // Send a message about the successful shot

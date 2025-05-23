@@ -19,7 +19,7 @@ fn main() {
     }
 
     // Validate that the position is within the board
-    if pos < 0 || pos > 99 {
+    if pos > 99 {
         panic!("Position out of bounds");
     }
 
