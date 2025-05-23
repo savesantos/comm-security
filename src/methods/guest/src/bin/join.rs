@@ -123,7 +123,7 @@ fn main() {
     
     // Validate the fleet placement 
     if board.len() < 18 {
-        panic!("VALIDATION ERROR: Not enough squares");
+        panic!("Not enough squares by boats");
     }
     // Now attempt the full validation
     match validate_fleet_placement(&board) {

@@ -27,6 +27,7 @@ use methods::{FIRE_ID, JOIN_ID, REPORT_ID, WAVE_ID, WIN_ID};
 struct Player {
     name: String,
     current_state: Digest,
+    last_turn_timestamp: u64,
 }
 struct Game {
     pmap: HashMap<String, Player>,
@@ -135,6 +136,13 @@ fn handle_join(shared: &SharedData, input_data: &CommunicationData) -> String {
     }
     let data: BaseJournal = input_data.receipt.journal.decode().unwrap();
     let mut gmap = shared.gmap.lock().unwrap();
+    
+    // Get current timestamp for initializing player
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    
     let game = gmap.entry(data.gameid.clone()).or_insert(Game {
         pmap: HashMap::new(),
         next_player: Some(data.fleet.clone()),
@@ -143,6 +151,7 @@ fn handle_join(shared: &SharedData, input_data: &CommunicationData) -> String {
     let player_inserted = game.pmap.entry(data.fleet.clone()).or_insert_with(|| Player {
         name: data.fleet.clone(),
         current_state: data.board.clone(),
+        last_turn_timestamp: current_time,
     }).name == data.fleet;
     let mesg = if player_inserted {
         format!("{} joined game {}", data.fleet, data.gameid)
@@ -172,6 +181,18 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
             return "Game not found".to_string();
         }
     };
+
+    // Check if the target is in the game - CHECK THIS FIRST before getting mutable reference
+    if !game.pmap.contains_key(&data.target) {
+        shared.tx.send(format!("Target {} not found in game {}", data.target, data.gameid)).unwrap();
+        return "Target not found".to_string();
+    }
+
+    // Check if the target is not the player itself
+    if data.fleet == data.target {
+        shared.tx.send(format!("Cannot fire at yourself in game {}", data.gameid)).unwrap();
+        return "Cannot fire at yourself".to_string();
+    }
 
     // Check if the player is in the game
     let player = match game.pmap.get_mut(&data.fleet) {
@@ -206,17 +227,14 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
         return "Invalid target position".to_string();
     }
 
-    // Check if the target is not the player itself
-    if data.fleet == data.target {
-        shared.tx.send(format!("Cannot fire at yourself in game {}", data.gameid)).unwrap();
-        return "Cannot fire at yourself".to_string();
-    }
-
-    // Check if the target is in the game
-    if !game.pmap.contains_key(&data.target) {
-        shared.tx.send(format!("Target {} not found in game {}", data.target, data.gameid)).unwrap();
-        return "Target not found".to_string();
-    }
+    // Get current timestamp
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    
+    // Update the timestamp for the player who just reported
+    player.last_turn_timestamp = current_time;
 
     // Update who needs to report to the player that was just fired at
     game.next_report = Some(data.target.clone());
@@ -225,7 +243,7 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
     game.next_player = None;
     
     // Send a message about the successful shot
-    let msg  = format!(
+    let msg = format!(
         "{} fired at {} in game {} at position {}",
         data.fleet,
         data.target,
@@ -238,7 +256,6 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
 }
 
 fn handle_report(shared: &SharedData, input_data: &CommunicationData) -> String {
-    // TO DO:
     // Check validity of receipt
     if input_data.receipt.verify(REPORT_ID).is_err() {
         shared.tx.send("Attempting to report with invalid receipt".to_string()).unwrap();
@@ -318,7 +335,80 @@ fn handle_report(shared: &SharedData, input_data: &CommunicationData) -> String 
 }
 
 fn handle_wave(shared: &SharedData, input_data: &CommunicationData) -> String {
-    // TO DO:
+    // Check validity of receipt
+    if input_data.receipt.verify(WAVE_ID).is_err() {
+        shared.tx.send("Attempting to wave with invalid receipt".to_string()).unwrap();
+        return "Could not verify receipt".to_string();
+    }
+    // Decode the journal
+    let data: BaseJournal = input_data.receipt.journal.decode().unwrap();
+    let mut gmap = shared.gmap.lock().unwrap();
+
+    // Check if the game exists
+    let game = match gmap.get_mut(&data.gameid) {
+        Some(game) => game,
+        None => {
+            shared.tx.send(format!("Game {} not found", data.gameid)).unwrap();
+            return "Game not found".to_string();
+        }
+    };
+
+    // Check if the player is in the game
+    let player = match game.pmap.get_mut(&data.fleet) {
+        Some(player) => player,
+        None => {
+            shared.tx.send(format!("Player {} not found in game {}", data.fleet, data.gameid)).unwrap();
+            return "Player not found".to_string();
+        }
+    };
+
+    // Check if player's board hash matches the current state (current saved board hash)
+    if player.current_state != data.board {
+        shared.tx.send(format!("Player {}'s board hash does not match the current state in game {}", data.fleet, data.gameid)).unwrap();
+        return "Board hash mismatch".to_string();
+    }
+
+    // check if the player does not have to report
+    if game.next_report.is_some() {
+        shared.tx.send(format!("Cannot wave until player {} has reported in game {}", game.next_report.as_ref().unwrap(), data.gameid)).unwrap();
+        return format!("Cannot wave until player {} has reported", game.next_report.as_ref().unwrap()).to_string();
+    }
+
+    // Check if it's the player's turn to wave
+    if game.next_player.as_ref() != Some(&data.fleet) {
+        shared.tx.send(format!("Not {}'s turn to wave in game {}", data.fleet, data.gameid)).unwrap();
+        return "Not your turn to wave".to_string();
+    }
+
+    // Find the player who hasn't had a turn in the longest time
+    let mut oldest_timestamp = u64::MAX;
+    let mut next_player_name = String::new();
+    
+    for (player_name, player_data) in &game.pmap {
+        if player_name != &data.fleet && player_data.last_turn_timestamp < oldest_timestamp {
+            oldest_timestamp = player_data.last_turn_timestamp;
+            next_player_name = player_name.clone();
+        }
+    }
+    
+    if next_player_name.is_empty() {
+        shared.tx.send(format!("Player {} has no other players to pass turn to in game {}", data.fleet, data.gameid)).unwrap();
+        return "No other players to pass turn to".to_string();
+    }
+    
+    // Update the next player to the one who hasn't played the longest
+    game.next_player = Some(next_player_name.clone());
+    
+    // Send a message about the successful wave
+    let msg = format!(
+        "{} waved in game {} and passed turn to {} (who hasn't played since timestamp {})",
+        data.fleet,
+        data.gameid,
+        next_player_name,
+        oldest_timestamp
+    );
+    shared.tx.send(msg).unwrap();
+
     "OK".to_string()
 }
 
