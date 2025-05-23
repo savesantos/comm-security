@@ -56,12 +56,22 @@ pub async fn report(idata: FormData) -> String {
         Ok(values) => values,
         Err(err) => return err,
     };
-    // TO DO: Rebuild the receipt
+    // Calculate the position from x and y (matches the reverse formula in xy_pos method in blockchain)
+    let pos = y * 10 + x;
 
-    // Uncomment the following line when you are ready to send the receipt
-    //send_receipt(Command::Fire, receipt).await
-    // Comment out the following line when you are ready to send the receipt
-    "OK".to_string()
+    let report_inputs = FireInputs {
+        gameid: gameid.clone(),
+        fleet: fleetid.clone(),
+        board: board.clone(),
+        random: random.clone(),
+        target: _report.clone(),
+        pos: pos,
+    };
+
+    match generate_receipt_for_fire_inputs(report_inputs, REPORT_ELF) {
+        Ok(receipt) => send_receipt(Command::Report, receipt).await,
+        Err(e) => format!("Error creating report receipt: {}.", e),
+    }
 }
 
 pub async fn wave(idata: FormData) -> String {
