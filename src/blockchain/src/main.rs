@@ -56,8 +56,10 @@ async fn main() {
         rng: Arc::new(Mutex::new(rand::rngs::StdRng::from_entropy())),
     };
 
-    // Build our application with a route
+    // Clone shared data for the timeout checker before moving it to the extension
+    let timeout_checker = shared.clone();
 
+    // Build our application with a route
     let app = Router::new()
         .route("/", get(index))
         .route("/logs", get(logs))
@@ -70,6 +72,16 @@ async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], 3001));
     println!("Listening on http://{}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    
+    // Start the timeout checker task
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+            check_victory_timeouts(&timeout_checker).await;
+        }
+    });
+
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -584,5 +596,53 @@ fn handle_win(shared: &SharedData, input_data: &CommunicationData) -> String {
         game.first_victory_claim = None;
         
         return "Multiple victory claims - no winner. Game continues as normal.".to_string();
+    }
+}
+
+async fn check_victory_timeouts(shared: &SharedData) {
+    let mut gmap = shared.gmap.lock().unwrap();
+    let mut games_to_remove = Vec::new();
+    
+    for (gameid, game) in gmap.iter_mut() {
+        if let Some((first_claimant, first_claim_time)) = &game.first_victory_claim {
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            
+            if current_time - first_claim_time >= game.victory_timeout_seconds {
+                // Handle timeout expiration logic here
+                let all_victors: Vec<String> = game.pmap
+                    .iter()
+                    .filter(|(_, player)| player.has_claimed_victory)
+                    .map(|(name, _)| name.clone())
+                    .collect();
+
+                if all_victors.len() == 1 {
+                    let winner = &all_victors[0];
+                    let msg = format!("Victory timeout expired. {} wins game {}! Game ended.", winner, gameid);
+                    shared.tx.send(msg).unwrap();
+                    games_to_remove.push(gameid.clone());
+                } else {
+                    let conflict_msg = format!(
+                        "Victory timeout expired in game {} with multiple claimants: {}. No winner declared. Game continues as normal.",
+                        gameid,
+                        all_victors.join(", ")
+                    );
+                    shared.tx.send(conflict_msg).unwrap();
+                    
+                    // Reset victory claims
+                    for (_, player) in &mut game.pmap {
+                        player.has_claimed_victory = false;
+                    }
+                    game.first_victory_claim = None;
+                }
+            }
+        }
+    }
+    
+    // Remove ended games
+    for gameid in games_to_remove {
+        gmap.remove(&gameid);
     }
 }
