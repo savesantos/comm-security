@@ -28,11 +28,15 @@ struct Player {
     name: String,
     current_state: Digest,
     last_turn_timestamp: u64,
+    has_claimed_victory: bool,
 }
 struct Game {
     pmap: HashMap<String, Player>,
     next_player: Option<String>,
     next_report: Option<String>,
+    first_victory_claim: Option<(String, u64)>, // (player_name, timestamp)
+    victory_timeout_seconds: u64,
+    first_shot_fired: bool,
 }
 
 #[derive(Clone)]
@@ -143,16 +147,39 @@ fn handle_join(shared: &SharedData, input_data: &CommunicationData) -> String {
         .unwrap()
         .as_secs();
     
+    // Check if game exists and if the first shot has been fired
+    if let Some(existing_game) = gmap.get(&data.gameid) {
+        // Check if the first shot has been fired
+        if existing_game.first_shot_fired {
+            shared.tx.send(format!("Cannot join game {} - game has already started (first shot fired)", data.gameid)).unwrap();
+            return "Cannot join - game has already started".to_string();
+        }
+        
+        // Check if player is already in the game
+        if existing_game.pmap.contains_key(&data.fleet) {
+            shared.tx.send(format!("Player {} already in game {}", data.fleet, data.gameid)).unwrap();
+            return "Player already in game".to_string();
+        }
+    }
+    
+    // Create or get the game entry
     let game = gmap.entry(data.gameid.clone()).or_insert(Game {
         pmap: HashMap::new(),
         next_player: Some(data.fleet.clone()),
         next_report: None,
+        first_victory_claim: None,
+        victory_timeout_seconds: 30, // Default to 30 seconds
+        first_shot_fired: false,
     });
+    
+    // Insert the player into the game
     let player_inserted = game.pmap.entry(data.fleet.clone()).or_insert_with(|| Player {
         name: data.fleet.clone(),
         current_state: data.board.clone(),
         last_turn_timestamp: current_time,
+        has_claimed_victory: false,
     }).name == data.fleet;
+    
     let mesg = if player_inserted {
         format!("{} joined game {}", data.fleet, data.gameid)
     } else {
@@ -181,6 +208,20 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
             return "Game not found".to_string();
         }
     };
+
+    // Check if someone has claimed victory and timeout is active
+    if let Some((claimant, claim_time)) = &game.first_victory_claim {
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        if current_time - claim_time < game.victory_timeout_seconds {
+            let remaining_time = game.victory_timeout_seconds - (current_time - claim_time);
+            shared.tx.send(format!("Cannot fire during victory claim period. {} claimed victory. {} seconds remaining to contest by clicking on 'Win' button.", claimant, remaining_time)).unwrap();
+            return "Cannot fire during victory claim period".to_string();
+        }
+    }
 
     // Check if the target is in the game - CHECK THIS FIRST before getting mutable reference
     if !game.pmap.contains_key(&data.target) {
@@ -236,6 +277,9 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
     // Update the timestamp for the player who just reported
     player.last_turn_timestamp = current_time;
 
+    // Mark that the first shot has been fired
+    game.first_shot_fired = true;
+
     // Update who needs to report to the player that was just fired at
     game.next_report = Some(data.target.clone());
     
@@ -274,6 +318,20 @@ fn handle_report(shared: &SharedData, input_data: &CommunicationData) -> String 
             return "Game not found".to_string();
         }
     };
+
+    // Check if someone has claimed victory and timeout is active
+    if let Some((claimant, claim_time)) = &game.first_victory_claim {
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        if current_time - claim_time < game.victory_timeout_seconds {
+            let remaining_time = game.victory_timeout_seconds - (current_time - claim_time);
+            shared.tx.send(format!("Cannot report during victory claim period. {} claimed victory. {} seconds remaining to contest by clicking on 'Win' button .", claimant, remaining_time)).unwrap();
+            return "Cannot report during victory claim period".to_string();
+        }
+    }
 
     // Check if the player is in the game
     let player = match game.pmap.get_mut(&data.fleet) {
@@ -353,6 +411,20 @@ fn handle_wave(shared: &SharedData, input_data: &CommunicationData) -> String {
         }
     };
 
+    // Check if someone has claimed victory and timeout is active
+    if let Some((claimant, claim_time)) = &game.first_victory_claim {
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        if current_time - claim_time < game.victory_timeout_seconds {
+            let remaining_time = game.victory_timeout_seconds - (current_time - claim_time);
+            shared.tx.send(format!("Cannot wave during victory claim period. {} claimed victory. {} seconds remaining to contest by clicking on 'Win' button .", claimant, remaining_time)).unwrap();
+            return "Cannot wave during victory claim period".to_string();
+        }
+    }
+
     // Check if the player is in the game
     let player = match game.pmap.get_mut(&data.fleet) {
         Some(player) => player,
@@ -413,6 +485,104 @@ fn handle_wave(shared: &SharedData, input_data: &CommunicationData) -> String {
 }
 
 fn handle_win(shared: &SharedData, input_data: &CommunicationData) -> String {
-    // TO DO:
-    "OK".to_string()
+    // Check validity of receipt
+    if input_data.receipt.verify(WIN_ID).is_err() {
+        shared.tx.send("Attempting to win with invalid receipt".to_string()).unwrap();
+        return "Could not verify receipt".to_string();
+    }
+
+    // Decode the journal
+    let data: BaseJournal = input_data.receipt.journal.decode().unwrap();
+    let mut gmap = shared.gmap.lock().unwrap();
+
+    // Check if the game exists
+    let game = match gmap.get_mut(&data.gameid) {
+        Some(game) => game,
+        None => {
+            shared.tx.send(format!("Game {} not found", data.gameid)).unwrap();
+            return "Game not found".to_string();
+        }
+    };
+
+    // Check if the player is in the game
+    let player = match game.pmap.get_mut(&data.fleet) {
+        Some(player) => player,
+        None => {
+            shared.tx.send(format!("Player {} not found in game {}", data.fleet, data.gameid)).unwrap();
+            return "Player not found".to_string();
+        }
+    };
+
+    // Check if player's board hash matches the current state (current saved board hash)
+    if player.current_state != data.board {
+        shared.tx.send(format!("Player {}'s board hash does not match the current state in game {}", data.fleet, data.gameid)).unwrap();
+        return "Board hash mismatch".to_string();
+    }
+
+    // Get current timestamp
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    // Check if player has already claimed victory
+    if player.has_claimed_victory {
+        shared.tx.send(format!("Player {} has already claimed victory in game {}", data.fleet, data.gameid)).unwrap();
+        return "Already claimed victory".to_string();
+    }
+
+    // Save that the player has declared victory
+    player.has_claimed_victory = true;
+
+    // Check if this is the first victory claim
+    if game.first_victory_claim.is_none() {
+        game.first_victory_claim = Some((data.fleet.clone(), current_time));
+        let msg = format!("{} claims victory in game {}. Other players have {} seconds to contest by clicking on 'Win' button.", 
+                         data.fleet, data.gameid, game.victory_timeout_seconds);
+        shared.tx.send(msg).unwrap();
+        return "Victory claimed - timeout started.".to_string();
+    }
+
+    // Check if we're still within the timeout period
+    let (first_claimant, first_claim_time) = game.first_victory_claim.as_ref().unwrap();
+    if current_time - first_claim_time < game.victory_timeout_seconds {
+        let remaining_time = game.victory_timeout_seconds - (current_time - first_claim_time);
+        let msg = format!("{} contests victory of player {} in game {}! Game will resume after {} seconds.", 
+                         data.fleet, data.gameid, first_claimant, remaining_time);
+        shared.tx.send(msg).unwrap();
+        return "Victory contested. Game continues.".to_string();
+    }
+
+    // Timeout period has passed, check who won
+    let all_victors: Vec<String> = game.pmap
+        .iter()
+        .filter(|(_, player)| player.has_claimed_victory)
+        .map(|(name, _)| name.clone())
+        .collect();
+
+    if all_victors.len() == 1 {
+        let winner = &all_victors[0];
+        let msg = format!("Victory timeout expired. {} wins game {}! Game ended.", winner, data.gameid);
+        shared.tx.send(msg).unwrap();
+        
+        // Clean everything and end the game
+        gmap.remove(&data.gameid);
+        
+        return format!("{} wins - Game ended", winner);
+    } else {
+        let conflict_msg = format!(
+            "Victory timeout expired in game {} with multiple claimants: {}. No winner declared. Game continues as normal.",
+            data.gameid,
+            all_victors.join(", ")
+        );
+        shared.tx.send(conflict_msg).unwrap();
+        
+        // Reset victory claims and continue the game
+        for (_, player) in &mut game.pmap {
+            player.has_claimed_victory = false;
+        }
+        game.first_victory_claim = None;
+        
+        return "Multiple victory claims - no winner. Game continues as normal.".to_string();
+    }
 }
