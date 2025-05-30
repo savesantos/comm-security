@@ -1,6 +1,5 @@
 use fleetcore::{FireInputs, ReportJournal};
 use risc0_zkvm::guest::env;
-use risc0_zkvm::Digest;
 use sha2::{Digest as _, Sha256};
 
 fn main() {

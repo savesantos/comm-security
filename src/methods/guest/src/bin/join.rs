@@ -1,9 +1,12 @@
 use fleetcore::{BaseInputs, BaseJournal};
 use risc0_zkvm::guest::env;
-use risc0_zkvm::Digest;
 use sha2::{Digest as _, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 
+// IMPORTANT:This code follows the rules of the classical Battleship game.
+// Boats must be placed in a straight line (either horizontally or vertically), cannot touch each other either directly or diagonally, and must be of specific sizes.
+// The definition of classical Battleship comes from the internet, and disagrees with my childhood memories.
+// Not in the scope of this course, but important to note that the game has many variations, and this code implements one of them.
 fn validate_fleet_placement(board: &[u8]) -> Result<(), String> {
     // Expected ship sizes: 2 submarines (size 1), 2 cruisers (size 2), 
     // 1 destroyer (size 3), 1 battleship (size 4), 1 carrier (size 5)
@@ -27,90 +30,155 @@ fn validate_fleet_placement(board: &[u8]) -> Result<(), String> {
         return Err("Invalid square coordinates".to_string());
     }
 
+    // Use bitmask for faster lookups
+    let mut grid = [false; 100];
+    for &pos in board {
+        grid[pos as usize] = true;
+    }
+
     // Find all ships by looking for connected squares
-    let mut remaining_squares: HashSet<u8> = board.iter().copied().collect();
+    let mut visited = [false; 100];
     let mut ships = Vec::new();
 
-    while !remaining_squares.is_empty() {
-        // Start with any remaining square
-        let start = *remaining_squares.iter().next().unwrap();
-        let mut ship = vec![start];
-        remaining_squares.remove(&start);
-        
-        // Keep track of squares to check
-        let mut to_check = vec![start];
-        
-        while !to_check.is_empty() {
-            let current = to_check.pop().unwrap();
+    for &start in board {
+        if visited[start as usize] {
+            continue;
+        }
+
+        // BFS to find connected component
+        let mut ship = Vec::new();
+        let mut queue = VecDeque::new();
+        queue.push_back(start);
+        visited[start as usize] = true;
+
+        while let Some(current) = queue.pop_front() {
+            ship.push(current);
+
+            // Check adjacent squares (up, down, left, right only)
+            let row = current / 10;
+            let col = current % 10;
             
-            // Check adjacent squares (up, down, left, right)
-            let possible_adjacent = [
-                // Up (if not on top row)
-                if current >= 10 { Some(current - 10) } else { None },
-                // Down (if not on bottom row)
-                if current < 90 { Some(current + 10) } else { None },
-                // Left (if not on leftmost column)
-                if current % 10 != 0 { Some(current - 1) } else { None },
-                // Right (if not on rightmost column)
-                if current % 10 != 9 { Some(current + 1) } else { None },
+            let adjacent = [
+                if row > 0 { Some(current - 10) } else { None },     // Up
+                if row < 9 { Some(current + 10) } else { None },     // Down
+                if col > 0 { Some(current - 1) } else { None },      // Left
+                if col < 9 { Some(current + 1) } else { None },      // Right
             ];
-            
-            for adj in possible_adjacent.iter().flatten() {
-                if remaining_squares.contains(adj) {
-                    ship.push(*adj);
-                    remaining_squares.remove(adj);
-                    to_check.push(*adj);
+
+            for adj in adjacent.iter().flatten() {
+                if grid[*adj as usize] && !visited[*adj as usize] {
+                    visited[*adj as usize] = true;
+                    queue.push_back(*adj);
                 }
             }
         }
-        
-        // Add ship to the list
+
         ships.push(ship);
     }
 
-    // Check if we have the right ships
-    let mut ship_sizes: Vec<_> = ships.iter().map(|ship| ship.len() as i32).collect();
-    ship_sizes.sort_unstable();
-    
-    if ship_sizes != expected_ships {
+    // Validate ship counts
+    let mut ship_counts = HashMap::new();
+    for ship in &ships {
+        *ship_counts.entry(ship.len()).or_insert(0) += 1;
+    }
+
+    let expected_counts = HashMap::from([(1, 2), (2, 2), (3, 1), (4, 1), (5, 1)]);
+    if ship_counts != expected_counts {
         return Err(format!("Invalid ship configuration: expected {:?}, got {:?}", 
-                         expected_ships, ship_sizes));
+                         expected_counts, ship_counts));
     }
 
     // Validate ship shapes (must be straight lines)
     for ship in &ships {
-        if ship.len() > 1 {
-            let is_horizontal = ship.iter().all(|&sq| sq / 10 == ship[0] / 10);
-            let is_vertical = ship.iter().all(|&sq| sq % 10 == ship[0] % 10);
-            
-            if !is_horizontal && !is_vertical {
-                return Err("Ships must be straight lines".to_string());
+        if ship.len() > 1 && !is_straight_line(ship) {
+            return Err("Ships must be straight lines (no L-shapes allowed)".to_string());
+        }
+    }
+
+    // Check that ships don't touch each other (including diagonally)
+    if ships_touch_each_other(&ships) {
+        return Err("Ships cannot touch each other either directly or diagonally".to_string());
+    }
+
+    Ok(())
+}
+
+fn is_straight_line(ship: &[u8]) -> bool {
+    if ship.len() <= 1 {
+        return true;
+    }
+
+    let positions: Vec<(u8, u8)> = ship.iter()
+        .map(|&pos| (pos / 10, pos % 10))
+        .collect();
+
+    // Check if all positions are in the same row
+    let same_row = positions.iter().all(|(row, _)| *row == positions[0].0);
+    
+    // Check if all positions are in the same column
+    let same_col = positions.iter().all(|(_, col)| *col == positions[0].1);
+
+    if !same_row && !same_col {
+        return false;
+    }
+
+    // Check contiguity
+    if same_row {
+        let mut cols: Vec<u8> = positions.iter().map(|(_, col)| *col).collect();
+        cols.sort_unstable();
+        for i in 1..cols.len() {
+            if cols[i] != cols[i-1] + 1 {
+                return false;
             }
-            
-            // Check if the ship is contiguous
-            if is_horizontal {
-                let mut ship_coords: Vec<_> = ship.iter().map(|&sq| sq % 10).collect();
-                ship_coords.sort_unstable();
-                
-                for i in 1..ship_coords.len() {
-                    if ship_coords[i] != ship_coords[i-1] + 1 {
-                        return Err("Ship has gaps".to_string());
+        }
+    } else {
+        let mut rows: Vec<u8> = positions.iter().map(|(row, _)| *row).collect();
+        rows.sort_unstable();
+        for i in 1..rows.len() {
+            if rows[i] != rows[i-1] + 1 {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+fn ships_touch_each_other(ships: &[Vec<u8>]) -> bool {
+    let occupied: HashSet<u8> = ships.iter()
+        .flat_map(|ship| ship.iter())
+        .copied()
+        .collect();
+
+    for ship in ships {
+        for &pos in ship {
+            let row = pos / 10;
+            let col = pos % 10;
+
+            // Check all 8 surrounding squares
+            for dr in -1i32..=1 {
+                for dc in -1i32..=1 {
+                    if dr == 0 && dc == 0 {
+                        continue; // Skip the current position
                     }
-                }
-            } else { // is_vertical
-                let mut ship_coords: Vec<_> = ship.iter().map(|&sq| sq / 10).collect();
-                ship_coords.sort_unstable();
-                
-                for i in 1..ship_coords.len() {
-                    if ship_coords[i] != ship_coords[i-1] + 1 {
-                        return Err("Ship has gaps".to_string());
+
+                    let new_row = row as i32 + dr;
+                    let new_col = col as i32 + dc;
+
+                    if new_row >= 0 && new_row < 10 && new_col >= 0 && new_col < 10 {
+                        let adjacent_pos = (new_row as u8) * 10 + (new_col as u8);
+                        
+                        // If this adjacent position is occupied and not part of current ship
+                        if occupied.contains(&adjacent_pos) && !ship.contains(&adjacent_pos) {
+                            return true;
+                        }
                     }
                 }
             }
         }
     }
 
-    Ok(())
+    false
 }
 
 fn main() {
