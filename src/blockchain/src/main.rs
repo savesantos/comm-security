@@ -20,6 +20,7 @@ use std::{
 };
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
+use ed25519_dalek::{VerifyingKey, Verifier};
 
 use fleetcore::{BaseJournal, Command, FireJournal, CommunicationData, ReportJournal};
 use methods::{FIRE_ID, JOIN_ID, REPORT_ID, WAVE_ID, WIN_ID};
@@ -29,6 +30,7 @@ struct Player {
     current_state: Digest,
     last_turn_timestamp: u64,
     has_claimed_victory: bool,
+    verifying_key: VerifyingKey,
 }
 struct Game {
     pmap: HashMap<String, Player>,
@@ -152,6 +154,30 @@ fn handle_join(shared: &SharedData, input_data: &CommunicationData) -> String {
     }
     let data: BaseJournal = input_data.receipt.journal.decode().unwrap();
     let mut gmap = shared.gmap.lock().unwrap();
+
+    // Get verifying key from the receipt
+    let verifying_key = data.verifying_key.clone();
+
+    // Check if the verifying key is valid
+    if verifying_key.is_none() {
+        shared.tx.send("Verifying key is missing in join request".to_string()).unwrap();
+        return "Missing verifying key".to_string();
+    }
+
+    // Join data for verification
+    let mut verification_data = Vec::new();
+    verification_data.extend_from_slice(&data.gameid.as_bytes());
+    verification_data.extend_from_slice(&data.fleet.as_bytes());
+    verification_data.extend_from_slice(&data.board.as_bytes());
+
+    // Verify the signature
+    if verifying_key.verify(
+        &verification_data,
+        &data.signature,
+    ).is_err() {
+        shared.tx.send("Invalid signature in fire request".to_string()).unwrap();
+        return "Invalid signature".to_string();
+    }
     
     // Get current timestamp for initializing player
     let current_time = std::time::SystemTime::now()
@@ -190,6 +216,7 @@ fn handle_join(shared: &SharedData, input_data: &CommunicationData) -> String {
         current_state: data.board.clone(),
         last_turn_timestamp: current_time,
         has_claimed_victory: false,
+        verifying_key: verifying_key.unwrap(),
     }).name == data.fleet;
     
     let mesg = if player_inserted {
@@ -235,7 +262,7 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
         }
     }
 
-    // Check if the target is in the game - CHECK THIS FIRST before getting mutable reference
+    // Check if the target is in the game
     if !game.pmap.contains_key(&data.target) {
         shared.tx.send(format!("Target {} not found in game {}", data.target, data.gameid)).unwrap();
         return "Target not found".to_string();
@@ -255,6 +282,26 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
             return "Player not found".to_string();
         }
     };
+
+    // Get verifying key from player's data
+    let verifying_key = &player.verifying_key;
+
+    // Join data for verification
+    let mut verification_data = Vec::new();
+    verification_data.extend_from_slice(&data.gameid.as_bytes());
+    verification_data.extend_from_slice(&data.fleet.as_bytes());
+    verification_data.extend_from_slice(&data.board.as_bytes());
+    verification_data.extend_from_slice(&data.target.as_bytes());
+    verification_data.extend_from_slice(&data.pos.to_le_bytes());
+
+    // Verify the signature
+    if verifying_key.verify(
+        &verification_data,
+        &data.signature,
+    ).is_err() {
+        shared.tx.send("Invalid signature in fire request".to_string()).unwrap();
+        return "Invalid signature".to_string();
+    }
 
     // Check if player's board hash matches the current state (current saved board hash)
     if player.current_state != data.board {
@@ -354,6 +401,27 @@ fn handle_report(shared: &SharedData, input_data: &CommunicationData) -> String 
         }
     };
 
+    // Get verifying key from player's data
+    let verifying_key = &player.verifying_key;
+
+    // Join data for verification
+    let mut verification_data = Vec::new();
+    verification_data.extend_from_slice(&data.gameid.as_bytes());
+    verification_data.extend_from_slice(&data.fleet.as_bytes());
+    verification_data.extend_from_slice(&data.board.as_bytes());
+    verification_data.extend_from_slice(&data.report.as_bytes());
+    verification_data.extend_from_slice(&data.pos.to_le_bytes());
+    verification_data.extend_from_slice(&data.next_board.as_bytes());
+
+    // Verify the signature
+    if verifying_key.verify(
+        &verification_data,
+        &data.signature,
+    ).is_err() {
+        shared.tx.send("Invalid signature in report request".to_string()).unwrap();
+        return "Invalid signature".to_string();
+    }
+
     // Check if it's the player's turn to report
     if game.next_report.as_ref() != Some(&data.fleet) {
         shared.tx.send(format!("Not {}'s turn to report in game {}", data.fleet, data.gameid)).unwrap();
@@ -446,6 +514,24 @@ fn handle_wave(shared: &SharedData, input_data: &CommunicationData) -> String {
         }
     };
 
+    // Get verifying key from player's data
+    let verifying_key = &player.verifying_key;
+
+    // Join data for verification
+    let mut verification_data = Vec::new();
+    verification_data.extend_from_slice(&data.gameid.as_bytes());
+    verification_data.extend_from_slice(&data.fleet.as_bytes());
+    verification_data.extend_from_slice(&data.board.as_bytes());
+
+    // Verify the signature
+    if verifying_key.verify(
+        &verification_data,
+        &data.signature,
+    ).is_err() {
+        shared.tx.send("Invalid signature in wave request".to_string()).unwrap();
+        return "Invalid signature".to_string();
+    }
+
     // Check if player's board hash matches the current state (current saved board hash)
     if player.current_state != data.board {
         shared.tx.send(format!("Player {}'s board hash does not match the current state in game {}", data.fleet, data.gameid)).unwrap();
@@ -524,6 +610,24 @@ fn handle_win(shared: &SharedData, input_data: &CommunicationData) -> String {
             return "Player not found".to_string();
         }
     };
+
+    // Get verifying key from player's data
+    let verifying_key = &player.verifying_key;
+
+    // Join data for verification
+    let mut verification_data = Vec::new();
+    verification_data.extend_from_slice(&data.gameid.as_bytes());
+    verification_data.extend_from_slice(&data.fleet.as_bytes());
+    verification_data.extend_from_slice(&data.board.as_bytes());
+
+    // Verify the signature
+    if verifying_key.verify(
+        &verification_data,
+        &data.signature,
+    ).is_err() {
+        shared.tx.send("Invalid signature in win request".to_string()).unwrap();
+        return "Invalid signature".to_string();
+    }
 
     // Check if player's board hash matches the current state (current saved board hash)
     if player.current_state != data.board {
