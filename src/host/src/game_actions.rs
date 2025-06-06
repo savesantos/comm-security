@@ -28,7 +28,7 @@ pub async fn join_game(idata: FormData) -> String {
             let (signing_key, verifying_key) = generate_keys_from_random(&random);
 
             // Sign the receipt with the generated key
-            let signature = signing_key.sign(&receipt.inner.flat().clone()).to_bytes();
+            let signature = signing_key.sign(&receipt.journal.bytes.as_slice()).to_bytes();
             let public_key = verifying_key.to_bytes();
 
             // Send the receipt along with the command and keys
@@ -62,7 +62,7 @@ pub async fn fire(idata: FormData) -> String {
             let (signing_key, _verifying_key) = generate_keys_from_random(&random);
 
             // Sign the receipt with the generated key
-            let signature = signing_key.sign(&receipt.inner.flat().clone()).to_bytes();
+            let signature = signing_key.sign(&receipt.journal.bytes.as_slice()).to_bytes();
 
             // Send the receipt along with the command and keys
             send_receipt(Command::Fire, receipt, &signature, None).await
@@ -94,7 +94,7 @@ pub async fn report(idata: FormData) -> String {
             let (signing_key, _verifying_key) = generate_keys_from_random(&random);
 
             // Sign the receipt with the generated key
-            let signature = signing_key.sign(&receipt.inner.flat().clone()).to_bytes();
+            let signature = signing_key.sign(&receipt.journal.bytes.as_slice()).to_bytes();
 
             // Send the receipt along with the command and keys
             send_receipt(Command::Report, receipt, &signature, None).await
@@ -122,7 +122,7 @@ pub async fn wave(idata: FormData) -> String {
             let (signing_key, _verifying_key) = generate_keys_from_random(&random);
 
             // Sign the receipt with the generated key
-            let signature = signing_key.sign(&receipt.inner.flat().clone()).to_bytes();
+            let signature = signing_key.sign(&receipt.journal.bytes.as_slice()).to_bytes();
 
             // Send the receipt along with the command and keys
             send_receipt(Command::Wave, receipt, &signature, None).await
@@ -150,7 +150,7 @@ pub async fn win(idata: FormData) -> String {
             let (signing_key, _verifying_key) = generate_keys_from_random(&random);
 
             // Sign the receipt with the generated key
-            let signature = signing_key.sign(&receipt.inner.flat().clone()).to_bytes();
+            let signature = signing_key.sign(&receipt.journal.bytes.as_slice()).to_bytes();
 
             // Send the receipt along with the command and keys
             send_receipt(Command::Win, receipt, &signature, None).await

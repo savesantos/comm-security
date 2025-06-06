@@ -185,7 +185,7 @@ fn handle_join(shared: &SharedData, input_data: &CommunicationData) -> String {
     };
 
     // Verify the signature against the receipt data
-    if verifying_key.verify(&input_data.receipt.inner.flat(), &signature).is_err() {
+    if verifying_key.verify(&input_data.receipt.journal.bytes.as_slice(), &signature).is_err() {
         shared.tx.send("Invalid signature in join request".to_string()).unwrap();
         return "Invalid signature".to_string();
     }
@@ -283,7 +283,7 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
     };
 
     // Verify the signature against the receipt data
-    if verifying_key.verify(&input_data.receipt.inner.flat(), &signature).is_err() {
+    if verifying_key.verify(&input_data.receipt.journal.bytes.as_slice(), &signature).is_err() {
         shared.tx.send("Invalid signature in fire request".to_string()).unwrap();
         return "Invalid signature".to_string();
     }
@@ -411,7 +411,7 @@ fn handle_report(shared: &SharedData, input_data: &CommunicationData) -> String 
     };
 
     // Verify the signature against the receipt data
-    if verifying_key.verify(&input_data.receipt.inner.flat(), &signature).is_err() {
+    if verifying_key.verify(&input_data.receipt.journal.bytes.as_slice(), &signature).is_err() {
         shared.tx.send("Invalid signature in report request".to_string()).unwrap();
         return "Invalid signature".to_string();
     }
@@ -522,7 +522,7 @@ fn handle_wave(shared: &SharedData, input_data: &CommunicationData) -> String {
     };
 
     // Verify the signature against the receipt data
-    if verifying_key.verify(&input_data.receipt.inner.flat(), &signature).is_err() {
+    if verifying_key.verify(&input_data.receipt.journal.bytes.as_slice(), &signature).is_err() {
         shared.tx.send("Invalid signature in wave request".to_string()).unwrap();
         return "Invalid signature".to_string();
     }
@@ -633,7 +633,7 @@ fn handle_win(shared: &SharedData, input_data: &CommunicationData) -> String {
     };
 
     // Verify the signature against the receipt data
-    if verifying_key.verify(&input_data.receipt.inner.flat(), &signature).is_err() {
+    if verifying_key.verify(&input_data.receipt.journal.bytes.as_slice(), &signature).is_err() {
         shared.tx.send("Invalid signature in win request".to_string()).unwrap();
         return "Invalid signature".to_string();
     }
