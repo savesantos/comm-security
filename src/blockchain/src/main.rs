@@ -176,13 +176,7 @@ fn handle_join(shared: &SharedData, input_data: &CommunicationData) -> String {
     };
 
     // Convert signature bytes to Signature
-    let signature = match Signature::from_bytes(input_data.signature.as_slice().try_into().unwrap()) {
-        Ok(sig) => sig,
-        Err(_) => {
-            shared.tx.send("Invalid signature format in join request".to_string()).unwrap();
-            return "Invalid signature format".to_string();
-        }
-    };
+    let signature = Signature::from_bytes(input_data.signature.as_slice().try_into().unwrap());
 
     // Verify the signature against the receipt data
     if verifying_key.verify(&input_data.receipt.journal.bytes.as_slice(), &signature).is_err() {
@@ -261,6 +255,18 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
         }
     };
 
+    // Check if the target is in the game
+    if !game.pmap.contains_key(&data.target) {
+        shared.tx.send(format!("Target {} not found in game {}", data.target, data.gameid)).unwrap();
+        return "Target not found".to_string();
+    }
+
+    // Check if the target is not the player itself
+    if data.fleet == data.target {
+        shared.tx.send(format!("Cannot fire at yourself in game {}", data.gameid)).unwrap();
+        return "Cannot fire at yourself".to_string();
+    }
+
     // Check if the player is in the game
     let player = match game.pmap.get_mut(&data.fleet) {
         Some(player) => player,
@@ -274,13 +280,7 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
     let verifying_key = &player.verifying_key;
 
     // Convert signature bytes to Signature
-    let signature = match Signature::from_bytes(input_data.signature.as_slice().try_into().unwrap()) {
-        Ok(sig) => sig,
-        Err(_) => {
-            shared.tx.send("Invalid signature format in fire request".to_string()).unwrap();
-            return "Invalid signature format".to_string();
-        }
-    };
+    let signature = Signature::from_bytes(input_data.signature.as_slice().try_into().unwrap());
 
     // Verify the signature against the receipt data
     if verifying_key.verify(&input_data.receipt.journal.bytes.as_slice(), &signature).is_err() {
@@ -300,18 +300,6 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
             shared.tx.send(format!("Cannot fire during victory claim period. {} claimed victory. {} seconds remaining to contest by clicking on 'Win' button.", claimant, remaining_time)).unwrap();
             return "Cannot fire during victory claim period".to_string();
         }
-    }
-
-    // Check if the target is in the game
-    if !game.pmap.contains_key(&data.target) {
-        shared.tx.send(format!("Target {} not found in game {}", data.target, data.gameid)).unwrap();
-        return "Target not found".to_string();
-    }
-
-    // Check if the target is not the player itself
-    if data.fleet == data.target {
-        shared.tx.send(format!("Cannot fire at yourself in game {}", data.gameid)).unwrap();
-        return "Cannot fire at yourself".to_string();
     }
 
     // Check if player's board hash matches the current state (current saved board hash)
@@ -402,13 +390,7 @@ fn handle_report(shared: &SharedData, input_data: &CommunicationData) -> String 
     let verifying_key = &player.verifying_key;
 
     // Convert signature bytes to Signature
-    let signature = match Signature::from_bytes(input_data.signature.as_slice().try_into().unwrap()) {
-        Ok(sig) => sig,
-        Err(_) => {
-            shared.tx.send("Invalid signature format in report request".to_string()).unwrap();
-            return "Invalid signature format".to_string();
-        }
-    };
+    let signature = Signature::from_bytes(input_data.signature.as_slice().try_into().unwrap());
 
     // Verify the signature against the receipt data
     if verifying_key.verify(&input_data.receipt.journal.bytes.as_slice(), &signature).is_err() {
@@ -513,13 +495,7 @@ fn handle_wave(shared: &SharedData, input_data: &CommunicationData) -> String {
     let verifying_key = &player.verifying_key;
 
     // Convert signature bytes to Signature
-    let signature = match Signature::from_bytes(input_data.signature.as_slice().try_into().unwrap()) {
-        Ok(sig) => sig,
-        Err(_) => {
-            shared.tx.send("Invalid signature format in wave request".to_string()).unwrap();
-            return "Invalid signature format".to_string();
-        }
-    };
+    let signature = Signature::from_bytes(input_data.signature.as_slice().try_into().unwrap());
 
     // Verify the signature against the receipt data
     if verifying_key.verify(&input_data.receipt.journal.bytes.as_slice(), &signature).is_err() {
@@ -624,13 +600,7 @@ fn handle_win(shared: &SharedData, input_data: &CommunicationData) -> String {
     let verifying_key = &player.verifying_key;
 
     // Convert signature bytes to Signature
-    let signature = match Signature::from_bytes(input_data.signature.as_slice().try_into().unwrap()) {
-        Ok(sig) => sig,
-        Err(_) => {
-            shared.tx.send("Invalid signature format in win request".to_string()).unwrap();
-            return "Invalid signature format".to_string();
-        }
-    };
+    let signature = Signature::from_bytes(input_data.signature.as_slice().try_into().unwrap());
 
     // Verify the signature against the receipt data
     if verifying_key.verify(&input_data.receipt.journal.bytes.as_slice(), &signature).is_err() {
