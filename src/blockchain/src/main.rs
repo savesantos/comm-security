@@ -20,7 +20,7 @@ use std::{
 };
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
-use ed25519_dalek::{VerifyingKey, Verifier};
+use ed25519_dalek::{VerifyingKey, Verifier, Signature};
 
 use fleetcore::{BaseJournal, Command, FireJournal, CommunicationData, ReportJournal};
 use methods::{FIRE_ID, JOIN_ID, REPORT_ID, WAVE_ID, WIN_ID};
@@ -148,36 +148,49 @@ async fn smart_contract(
 }
 
 fn handle_join(shared: &SharedData, input_data: &CommunicationData) -> String {
+    // Verify the receipt first
     if input_data.receipt.verify(JOIN_ID).is_err() {
         shared.tx.send("Attempting to join game with invalid receipt".to_string()).unwrap();
         return "Could not verify receipt".to_string();
     }
+    
+    // Decode the journal
     let data: BaseJournal = input_data.receipt.journal.decode().unwrap();
-    let mut gmap = shared.gmap.lock().unwrap();
 
-    // Get verifying key from the receipt
-    let verifying_key = data.verifying_key.clone();
+    // Get verifying key from the communication data
+    let verifying_key_bytes = match input_data.public_key.as_ref() {
+        Some(pk) => pk,
+        None => {
+            shared.tx.send("Verifying key is missing in join request".to_string()).unwrap();
+            return "Missing verifying key".to_string();
+        }
+    };
 
-    // Check if the verifying key is valid
-    if verifying_key.is_none() {
-        shared.tx.send("Verifying key is missing in join request".to_string()).unwrap();
-        return "Missing verifying key".to_string();
-    }
+    // Convert bytes to VerifyingKey
+    let verifying_key = match VerifyingKey::from_bytes(verifying_key_bytes.as_slice().try_into().unwrap()) {
+        Ok(key) => key,
+        Err(_) => {
+            shared.tx.send("Invalid verifying key in join request".to_string()).unwrap();
+            return "Invalid verifying key".to_string();
+        }
+    };
 
-    // Join data for verification
-    let mut verification_data = Vec::new();
-    verification_data.extend_from_slice(&data.gameid.as_bytes());
-    verification_data.extend_from_slice(&data.fleet.as_bytes());
-    verification_data.extend_from_slice(&data.board.as_bytes());
+    // Convert signature bytes to Signature
+    let signature = match Signature::from_bytes(input_data.signature.as_slice().try_into().unwrap()) {
+        Ok(sig) => sig,
+        Err(_) => {
+            shared.tx.send("Invalid signature format in join request".to_string()).unwrap();
+            return "Invalid signature format".to_string();
+        }
+    };
 
-    // Verify the signature
-    if verifying_key.verify(
-        &verification_data,
-        &data.signature,
-    ).is_err() {
-        shared.tx.send("Invalid signature in fire request".to_string()).unwrap();
+    // Verify the signature against the receipt data
+    if verifying_key.verify(&input_data.receipt.inner.flat(), &signature).is_err() {
+        shared.tx.send("Invalid signature in join request".to_string()).unwrap();
         return "Invalid signature".to_string();
     }
+
+    let mut gmap = shared.gmap.lock().unwrap();
     
     // Get current timestamp for initializing player
     let current_time = std::time::SystemTime::now()
@@ -206,7 +219,7 @@ fn handle_join(shared: &SharedData, input_data: &CommunicationData) -> String {
         next_player: Some(data.fleet.clone()),
         next_report: None,
         first_victory_claim: None,
-        victory_timeout_seconds: 30, // Default to 30 seconds
+        victory_timeout_seconds: 30,
         first_shot_fired: false,
     });
     
@@ -216,7 +229,7 @@ fn handle_join(shared: &SharedData, input_data: &CommunicationData) -> String {
         current_state: data.board.clone(),
         last_turn_timestamp: current_time,
         has_claimed_victory: false,
-        verifying_key: verifying_key.unwrap(),
+        verifying_key: verifying_key,
     }).name == data.fleet;
     
     let mesg = if player_inserted {
@@ -229,7 +242,7 @@ fn handle_join(shared: &SharedData, input_data: &CommunicationData) -> String {
 }
 
 fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
-    // Check validity of receipt
+    // Verify the receipt first
     if input_data.receipt.verify(FIRE_ID).is_err() {
         shared.tx.send("Attempting to fire with invalid receipt".to_string()).unwrap();
         return "Could not verify receipt".to_string();
@@ -247,6 +260,33 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
             return "Game not found".to_string();
         }
     };
+
+    // Check if the player is in the game
+    let player = match game.pmap.get_mut(&data.fleet) {
+        Some(player) => player,
+        None => {
+            shared.tx.send(format!("Player {} not found in game {}", data.fleet, data.gameid)).unwrap();
+            return "Player not found".to_string();
+        }
+    };
+
+    // Get verifying key from player
+    let verifying_key = &player.verifying_key;
+
+    // Convert signature bytes to Signature
+    let signature = match Signature::from_bytes(input_data.signature.as_slice().try_into().unwrap()) {
+        Ok(sig) => sig,
+        Err(_) => {
+            shared.tx.send("Invalid signature format in fire request".to_string()).unwrap();
+            return "Invalid signature format".to_string();
+        }
+    };
+
+    // Verify the signature against the receipt data
+    if verifying_key.verify(&input_data.receipt.inner.flat(), &signature).is_err() {
+        shared.tx.send("Invalid signature in fire request".to_string()).unwrap();
+        return "Invalid signature".to_string();
+    }
 
     // Check if someone has claimed victory and timeout is active
     if let Some((claimant, claim_time)) = &game.first_victory_claim {
@@ -272,35 +312,6 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
     if data.fleet == data.target {
         shared.tx.send(format!("Cannot fire at yourself in game {}", data.gameid)).unwrap();
         return "Cannot fire at yourself".to_string();
-    }
-
-    // Check if the player is in the game
-    let player = match game.pmap.get_mut(&data.fleet) {
-        Some(player) => player,
-        None => {
-            shared.tx.send(format!("Player {} not found in game {}", data.fleet, data.gameid)).unwrap();
-            return "Player not found".to_string();
-        }
-    };
-
-    // Get verifying key from player's data
-    let verifying_key = &player.verifying_key;
-
-    // Join data for verification
-    let mut verification_data = Vec::new();
-    verification_data.extend_from_slice(&data.gameid.as_bytes());
-    verification_data.extend_from_slice(&data.fleet.as_bytes());
-    verification_data.extend_from_slice(&data.board.as_bytes());
-    verification_data.extend_from_slice(&data.target.as_bytes());
-    verification_data.extend_from_slice(&data.pos.to_le_bytes());
-
-    // Verify the signature
-    if verifying_key.verify(
-        &verification_data,
-        &data.signature,
-    ).is_err() {
-        shared.tx.send("Invalid signature in fire request".to_string()).unwrap();
-        return "Invalid signature".to_string();
     }
 
     // Check if player's board hash matches the current state (current saved board hash)
@@ -359,7 +370,7 @@ fn handle_fire(shared: &SharedData, input_data: &CommunicationData) -> String {
 }
 
 fn handle_report(shared: &SharedData, input_data: &CommunicationData) -> String {
-    // Check validity of receipt
+    // Verify the receipt first
     if input_data.receipt.verify(REPORT_ID).is_err() {
         shared.tx.send("Attempting to report with invalid receipt".to_string()).unwrap();
         return "Could not verify receipt".to_string();
@@ -378,20 +389,6 @@ fn handle_report(shared: &SharedData, input_data: &CommunicationData) -> String 
         }
     };
 
-    // Check if someone has claimed victory and timeout is active
-    if let Some((claimant, claim_time)) = &game.first_victory_claim {
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        
-        if current_time - claim_time < game.victory_timeout_seconds {
-            let remaining_time = game.victory_timeout_seconds - (current_time - claim_time);
-            shared.tx.send(format!("Cannot report during victory claim period. {} claimed victory. {} seconds remaining to contest by clicking on 'Win' button .", claimant, remaining_time)).unwrap();
-            return "Cannot report during victory claim period".to_string();
-        }
-    }
-
     // Check if the player is in the game
     let player = match game.pmap.get_mut(&data.fleet) {
         Some(player) => player,
@@ -401,25 +398,36 @@ fn handle_report(shared: &SharedData, input_data: &CommunicationData) -> String 
         }
     };
 
-    // Get verifying key from player's data
+    // Get verifying key from player
     let verifying_key = &player.verifying_key;
 
-    // Join data for verification
-    let mut verification_data = Vec::new();
-    verification_data.extend_from_slice(&data.gameid.as_bytes());
-    verification_data.extend_from_slice(&data.fleet.as_bytes());
-    verification_data.extend_from_slice(&data.board.as_bytes());
-    verification_data.extend_from_slice(&data.report.as_bytes());
-    verification_data.extend_from_slice(&data.pos.to_le_bytes());
-    verification_data.extend_from_slice(&data.next_board.as_bytes());
+    // Convert signature bytes to Signature
+    let signature = match Signature::from_bytes(input_data.signature.as_slice().try_into().unwrap()) {
+        Ok(sig) => sig,
+        Err(_) => {
+            shared.tx.send("Invalid signature format in report request".to_string()).unwrap();
+            return "Invalid signature format".to_string();
+        }
+    };
 
-    // Verify the signature
-    if verifying_key.verify(
-        &verification_data,
-        &data.signature,
-    ).is_err() {
+    // Verify the signature against the receipt data
+    if verifying_key.verify(&input_data.receipt.inner.flat(), &signature).is_err() {
         shared.tx.send("Invalid signature in report request".to_string()).unwrap();
         return "Invalid signature".to_string();
+    }
+
+    // Check if someone has claimed victory and timeout is active
+    if let Some((claimant, claim_time)) = &game.first_victory_claim {
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        if current_time - claim_time < game.victory_timeout_seconds {
+            let remaining_time = game.victory_timeout_seconds - (current_time - claim_time);
+            shared.tx.send(format!("Cannot report during victory claim period. {} claimed victory. {} seconds remaining to contest by clicking on 'Win' button.", claimant, remaining_time)).unwrap();
+            return "Cannot report during victory claim period".to_string();
+        }
     }
 
     // Check if it's the player's turn to report
@@ -473,11 +481,12 @@ fn handle_report(shared: &SharedData, input_data: &CommunicationData) -> String 
 }
 
 fn handle_wave(shared: &SharedData, input_data: &CommunicationData) -> String {
-    // Check validity of receipt
+    // Verify the receipt first
     if input_data.receipt.verify(WAVE_ID).is_err() {
         shared.tx.send("Attempting to wave with invalid receipt".to_string()).unwrap();
         return "Could not verify receipt".to_string();
     }
+
     // Decode the journal
     let data: BaseJournal = input_data.receipt.journal.decode().unwrap();
     let mut gmap = shared.gmap.lock().unwrap();
@@ -491,20 +500,6 @@ fn handle_wave(shared: &SharedData, input_data: &CommunicationData) -> String {
         }
     };
 
-    // Check if someone has claimed victory and timeout is active
-    if let Some((claimant, claim_time)) = &game.first_victory_claim {
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        
-        if current_time - claim_time < game.victory_timeout_seconds {
-            let remaining_time = game.victory_timeout_seconds - (current_time - claim_time);
-            shared.tx.send(format!("Cannot wave during victory claim period. {} claimed victory. {} seconds remaining to contest by clicking on 'Win' button .", claimant, remaining_time)).unwrap();
-            return "Cannot wave during victory claim period".to_string();
-        }
-    }
-
     // Check if the player is in the game
     let player = match game.pmap.get_mut(&data.fleet) {
         Some(player) => player,
@@ -514,22 +509,36 @@ fn handle_wave(shared: &SharedData, input_data: &CommunicationData) -> String {
         }
     };
 
-    // Get verifying key from player's data
+    // Get verifying key from player
     let verifying_key = &player.verifying_key;
 
-    // Join data for verification
-    let mut verification_data = Vec::new();
-    verification_data.extend_from_slice(&data.gameid.as_bytes());
-    verification_data.extend_from_slice(&data.fleet.as_bytes());
-    verification_data.extend_from_slice(&data.board.as_bytes());
+    // Convert signature bytes to Signature
+    let signature = match Signature::from_bytes(input_data.signature.as_slice().try_into().unwrap()) {
+        Ok(sig) => sig,
+        Err(_) => {
+            shared.tx.send("Invalid signature format in wave request".to_string()).unwrap();
+            return "Invalid signature format".to_string();
+        }
+    };
 
-    // Verify the signature
-    if verifying_key.verify(
-        &verification_data,
-        &data.signature,
-    ).is_err() {
+    // Verify the signature against the receipt data
+    if verifying_key.verify(&input_data.receipt.inner.flat(), &signature).is_err() {
         shared.tx.send("Invalid signature in wave request".to_string()).unwrap();
         return "Invalid signature".to_string();
+    }
+
+    // Check if someone has claimed victory and timeout is active
+    if let Some((claimant, claim_time)) = &game.first_victory_claim {
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        if current_time - claim_time < game.victory_timeout_seconds {
+            let remaining_time = game.victory_timeout_seconds - (current_time - claim_time);
+            shared.tx.send(format!("Cannot wave during victory claim period. {} claimed victory. {} seconds remaining to contest by clicking on 'Win' button.", claimant, remaining_time)).unwrap();
+            return "Cannot wave during victory claim period".to_string();
+        }
     }
 
     // Check if player's board hash matches the current state (current saved board hash)
@@ -583,7 +592,7 @@ fn handle_wave(shared: &SharedData, input_data: &CommunicationData) -> String {
 }
 
 fn handle_win(shared: &SharedData, input_data: &CommunicationData) -> String {
-    // Check validity of receipt
+    // Verify the receipt first
     if input_data.receipt.verify(WIN_ID).is_err() {
         shared.tx.send("Attempting to win with invalid receipt".to_string()).unwrap();
         return "Could not verify receipt".to_string();
@@ -611,20 +620,20 @@ fn handle_win(shared: &SharedData, input_data: &CommunicationData) -> String {
         }
     };
 
-    // Get verifying key from player's data
+    // Get verifying key from player
     let verifying_key = &player.verifying_key;
 
-    // Join data for verification
-    let mut verification_data = Vec::new();
-    verification_data.extend_from_slice(&data.gameid.as_bytes());
-    verification_data.extend_from_slice(&data.fleet.as_bytes());
-    verification_data.extend_from_slice(&data.board.as_bytes());
+    // Convert signature bytes to Signature
+    let signature = match Signature::from_bytes(input_data.signature.as_slice().try_into().unwrap()) {
+        Ok(sig) => sig,
+        Err(_) => {
+            shared.tx.send("Invalid signature format in win request".to_string()).unwrap();
+            return "Invalid signature format".to_string();
+        }
+    };
 
-    // Verify the signature
-    if verifying_key.verify(
-        &verification_data,
-        &data.signature,
-    ).is_err() {
+    // Verify the signature against the receipt data
+    if verifying_key.verify(&input_data.receipt.inner.flat(), &signature).is_err() {
         shared.tx.send("Invalid signature in win request".to_string()).unwrap();
         return "Invalid signature".to_string();
     }
@@ -664,7 +673,7 @@ fn handle_win(shared: &SharedData, input_data: &CommunicationData) -> String {
     if current_time - first_claim_time < game.victory_timeout_seconds {
         let remaining_time = game.victory_timeout_seconds - (current_time - first_claim_time);
         let msg = format!("{} contests victory of player {} in game {}! Game will resume after {} seconds.", 
-                         data.fleet, data.gameid, first_claimant, remaining_time);
+                         data.fleet, first_claimant, data.gameid, remaining_time);
         shared.tx.send(msg).unwrap();
         return "Victory contested. Game continues.".to_string();
     }

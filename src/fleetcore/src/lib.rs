@@ -32,6 +32,8 @@ pub enum Command {Join, Fire, Report, Wave, Win}
 pub struct CommunicationData {
     pub cmd: Command,
     pub receipt: Receipt,
+    pub signature: Vec<u8>,
+    pub public_key: Option<Vec<u8>>,
 }
 
 // Struct to specify the  output journal for join, wave and win methods
@@ -40,8 +42,6 @@ pub struct BaseJournal {
     pub gameid: String,
     pub fleet: String,
     pub board: Digest,
-    pub signature: Vec<u8>,
-    pub verifying_key: Option<Vec<u8>>, // Only used in join phase
 }
 
 // Struct to specify the  output journal for fire method
@@ -52,7 +52,6 @@ pub struct FireJournal {
     pub board: Digest,
     pub target: String,
     pub pos: u8,
-    pub signature: Vec<u8>,
 }
 
 // Struct to specify the  output journal for report method
@@ -64,5 +63,4 @@ pub struct ReportJournal {
     pub pos: u8,
     pub board: Digest,
     pub next_board: Digest,
-    pub signature: Vec<u8>,
 }

@@ -14,6 +14,26 @@ use std::error::Error;
 
 pub use game_actions::{fire, join_game, report, wave, win};
 
+use std::collections::{HashMap, HashSet, VecDeque};
+use ed25519_dalek::{SigningKey, Signer, VerifyingKey};
+use sha2::{Sha256, Digest};
+
+fn generate_keys_from_random(random: &str) -> (SigningKey, VerifyingKey) {
+    // Create a deterministic seed from the random string
+    let mut hasher = Sha256::new();
+    hasher.update(random.as_bytes());
+    let seed_hash = hasher.finalize();
+    
+    // Take first 32 bytes as seed for Ed25519
+    let mut seed = [0u8; 32];
+    seed.copy_from_slice(&seed_hash[..32]);
+    
+    let signing_key = SigningKey::from_bytes(&seed);
+    let verifying_key = signing_key.verifying_key();
+    
+    (signing_key, verifying_key)
+}
+
 fn generate_receipt_for_base_inputs(
     base_inputs: BaseInputs,
     elf: &[u8],
@@ -39,13 +59,15 @@ fn generate_receipt_for_fire_inputs(
 }
 
 
-async fn send_receipt(action: Command, receipt: Receipt) -> String {
+async fn send_receipt(action: Command, receipt: Receipt, signature: &[u8], public_key: Option<&[u8]>) -> String {
     let client = reqwest::Client::new();
     let res = client
         .post("http://chain0:3001/chain")
         .json(&CommunicationData {
             cmd: action,
             receipt,
+            signature: signature.to_vec(),
+            public_key: public_key.map(|pk| pk.to_vec()),
         })
         .send()
         .await;
