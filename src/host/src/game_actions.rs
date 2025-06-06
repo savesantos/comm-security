@@ -2,12 +2,11 @@
 
 use fleetcore::{BaseInputs, Command, FireInputs};
 use methods::{FIRE_ELF, JOIN_ELF, REPORT_ELF, WAVE_ELF, WIN_ELF};
-use lib::{generate_keys_from_random};
 use ed25519_dalek::Signer;
 
 use crate::{
     generate_receipt_for_base_inputs, send_receipt, unmarshal_data, unmarshal_fire,
-    unmarshal_report, FormData, generate_receipt_for_fire_inputs,
+    unmarshal_report, FormData, generate_receipt_for_fire_inputs, generate_keys_from_random,
 };
 
 pub async fn join_game(idata: FormData) -> String {

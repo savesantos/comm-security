@@ -15,3 +15,5 @@ fleetcore = { path = "../fleetcore" }
 reqwest = { version = "0.12.8", features = ["json"] }
 nanoid = "0.3"
 percent-encoding = "2.1"
+ed25519-dalek = "2.0.0"
+sha2 = "0.10"

@@ -10,7 +10,6 @@ fleetcore = { path = "../../fleetcore" }
 risc0-zkvm = { version = "2.0.2", default-features = false, features = ['std'] }
 sha2 = "0.10.6"
 rand_core = "0.6.4"
-ed25519-dalek = "2.0.0"
 
 [patch.crates-io]
 # Placing this patch statement in the workspace Cargo.toml will add RISC Zero SHA-256 accelerator
