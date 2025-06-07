@@ -3,14 +3,23 @@ use risc0_zkvm::guest::env;
 use sha2::{Digest as _, Sha256};
 
 fn main() {
-    // read the input
-    let _input: FireInputs = env::read();
-    let gameid = _input.gameid.clone();
-    let fleet = _input.fleet.clone();
-    let board = _input.board.clone();
-    let random = _input.random.clone();
-    let target = _input.target.clone();
-    let pos = _input.pos.clone();
+    let input: FireInputs = env::read();
+    
+    // Validate it's this player's turn to fire
+    if input.game_next_player.as_ref() != Some(&input.fleet) {
+        panic!("Not your turn to fire");
+    }
+    
+    // Validate no one is waiting to report
+    if input.game_next_report.is_some() {
+        panic!("Cannot fire while someone needs to report");
+    }
+
+    let fleet = input.fleet.clone();
+    let board = input.board.clone();
+    let random = input.random.clone();
+    let target = input.target.clone();
+    let pos = input.pos.clone();
 
     // Validate that target is not himself
     if fleet == target {
@@ -38,11 +47,11 @@ fn main() {
     
     // create the output
     let output = FireJournal {
-        gameid: gameid,
-        fleet: fleet,
+        gameid: input.gameid,
+        fleet: input.fleet,
         board: committed_board_hash,
-        target: target,
-        pos: pos,
+        target: input.target,
+        pos: input.pos,
     };
 
     // write public output to the journal

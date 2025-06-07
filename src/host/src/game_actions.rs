@@ -1,6 +1,6 @@
 // src/game_actions.rs
 
-use fleetcore::{BaseInputs, Command, FireInputs};
+use fleetcore::{BaseInputs, Command, FireInputs, GameState};
 use methods::{FIRE_ELF, JOIN_ELF, REPORT_ELF, WAVE_ELF, WIN_ELF};
 use ed25519_dalek::Signer;
 
@@ -20,6 +20,8 @@ pub async fn join_game(idata: FormData) -> String {
         fleet: fleetid.clone(),
         board: board.clone(),
         random: random.clone(),
+        game_next_player: None,
+        game_next_report: None,
     };
 
     match generate_receipt_for_base_inputs(base_inputs, JOIN_ELF) {
@@ -38,12 +40,36 @@ pub async fn join_game(idata: FormData) -> String {
     }
 }
 
+// Add this function to fetch game state
+async fn fetch_game_state(gameid: &str, fleet: &str) -> Result<GameState, String> {
+    // Make HTTP request to blockchain's game state endpoint
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&format!("http://chain0:3001/gamestate/{}/{}", gameid, fleet))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch game state: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err("Failed to get game state".to_string());
+    }
+    
+    response.json().await
+        .map_err(|e| format!("Failed to parse game state: {}", e))
+}
+
 pub async fn fire(idata: FormData) -> String {
     let (gameid, fleetid, board, random, targetfleet, x, y) = match unmarshal_fire(&idata) {
         Ok(values) => values,
         Err(err) => return err,
     };
-
+    
+    // Fetch current game state for turn validation
+    let game_state = match fetch_game_state(&gameid, &fleetid).await {
+        Ok(state) => state,
+        Err(err) => return format!("Error fetching game state: {}", err),
+    };
+    
     // Calculate the position from x and y (matches the reverse formula in xy_pos method in blockchain)
     let pos = y * 10 + x;
 
@@ -54,6 +80,9 @@ pub async fn fire(idata: FormData) -> String {
         random: random.clone(),
         target: targetfleet.clone(),
         pos: pos,
+        // Include game state for turn validation
+        game_next_player: game_state.next_player,
+        game_next_report: game_state.next_report,
     };
 
     match generate_receipt_for_fire_inputs(fire_inputs, FIRE_ELF) {
@@ -76,6 +105,13 @@ pub async fn report(idata: FormData) -> String {
         Ok(values) => values,
         Err(err) => return err,
     };
+    
+    // Fetch current game state for turn validation
+    let game_state = match fetch_game_state(&gameid, &fleetid).await {
+        Ok(state) => state,
+        Err(err) => return format!("Error fetching game state: {}", err),
+    };
+    
     // Calculate the position from x and y (matches the reverse formula in xy_pos method in blockchain)
     let pos = y * 10 + x;
 
@@ -86,6 +122,9 @@ pub async fn report(idata: FormData) -> String {
         random: random.clone(),
         target: _report.clone(),
         pos: pos,
+        // Include game state for turn validation
+        game_next_player: game_state.next_player,
+        game_next_report: game_state.next_report,
     };
 
     match generate_receipt_for_fire_inputs(report_inputs, REPORT_ELF) {
@@ -108,12 +147,21 @@ pub async fn wave(idata: FormData) -> String {
         Ok(values) => values,
         Err(err) => return err,
     };
+
+    // Fetch current game state for turn validation
+    let game_state = match fetch_game_state(&gameid, &fleetid).await {
+        Ok(state) => state,
+        Err(err) => return format!("Error fetching game state: {}", err),
+    };
     
     let base_inputs = BaseInputs {
         gameid: gameid.clone(),
         fleet: fleetid.clone(),
         board: board.clone(),
         random: random.clone(),
+        // Include game state for turn validation
+        game_next_player: game_state.next_player,
+        game_next_report: game_state.next_report,
     };
 
     match generate_receipt_for_base_inputs(base_inputs, WAVE_ELF) {
@@ -142,6 +190,8 @@ pub async fn win(idata: FormData) -> String {
         fleet: fleetid.clone(),
         board: board.clone(),
         random: random.clone(),
+        game_next_player: None,
+        game_next_report: None,
     };
 
     match generate_receipt_for_base_inputs(base_inputs, WIN_ELF) {

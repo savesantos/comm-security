@@ -3,10 +3,13 @@ use risc0_zkvm::guest::env;
 use sha2::{Digest as _, Sha256};
 
 fn main() {
-    // read the input
     let input: FireInputs = env::read();
-    let gameid = input.gameid.clone();
-    let fleet = input.fleet.clone();
+    
+    // Validate it's this player's turn to report
+    if input.game_next_report.as_ref() != Some(&input.fleet) {
+        panic!("Not your turn to report");
+    }
+    
     let board = input.board.clone();
     let random = input.random.clone();
     let report = input.target.clone();
@@ -58,11 +61,11 @@ fn main() {
     
     // Create the output journal with the validated report
     let output = ReportJournal {
-        gameid,
-        fleet,
-        report,
-        pos,
-        board: committed_board_hash,
+        gameid: input.gameid,
+        fleet: input.fleet,
+        board: committed_board_hash, // Use the committed hash instead of raw board
+        report: input.target, // "Hit" or "Miss"
+        pos: input.pos,
         next_board: committed_new_board_hash,
     };
     

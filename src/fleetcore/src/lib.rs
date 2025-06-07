@@ -9,6 +9,16 @@ pub struct BaseInputs {
     pub fleet: String,
     pub board: Vec<u8>,
     pub random: String,
+    // Add turn validation fields
+    pub game_next_player: Option<String>,  // Who should fire next
+    pub game_next_report: Option<String>,  // Who should report next
+}
+
+// If GameState isn't available from fleetcore, add this struct definition
+#[derive(Deserialize, Serialize)]
+pub struct GameState {
+    pub next_player: Option<String>,
+    pub next_report: Option<String>,
 }
 
 // Struct sent by the rust code for input on the methods fire and report
@@ -21,6 +31,9 @@ pub struct FireInputs {
     pub random: String,
     pub target: String,
     pub pos: u8,
+    // Add turn validation fields
+    pub game_next_player: Option<String>,  // Who should fire next
+    pub game_next_report: Option<String>,  // Who should report next
 }
 
 // Enum used to define the command that will be sent to the server by the host in the communication packet

@@ -4,11 +4,22 @@ use sha2::{Digest as _, Sha256};
 
 fn main() {
     // read the input
-    let _input: BaseInputs = env::read();
-    let gameid = _input.gameid.clone();
-    let fleet = _input.fleet.clone();
-    let board = _input.board.clone();
-    let random = _input.random.clone();
+    let input: BaseInputs = env::read();
+    
+    // Validate it's this player's turn to wave (same logic as fire)
+    if input.game_next_player.as_ref() != Some(&input.fleet) {
+        panic!("Not your turn to wave");
+    }
+    
+    // Validate no one is waiting to report (same logic as fire)
+    if input.game_next_report.is_some() {
+        panic!("Cannot wave while someone needs to report");
+    }
+    
+    let gameid = input.gameid.clone();
+    let fleet = input.fleet.clone();
+    let board = input.board.clone();
+    let random = input.random.clone();
 
     // Encrypt the fleet position by hashing the board with a nonce (random)
     let mut hasher = Sha256::new();

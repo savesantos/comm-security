@@ -1,16 +1,12 @@
-// Remove the following 3 lines to enable compiler checkings
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-#![allow(dead_code)]
-
 use axum::{
-    extract::Extension,
+    extract::{Extension, Path},
     response::{sse::Event, Html, IntoResponse},
     routing::{get, post},
     Json, Router,
 };
+use serde::Serialize;
 use futures::stream::StreamExt;
-use rand::{seq::IteratorRandom, SeedableRng};
+use rand::SeedableRng;
 use risc0_zkvm::Digest;
 use std::{
     collections::HashMap,
@@ -45,7 +41,7 @@ struct Game {
 struct SharedData {
     tx: broadcast::Sender<String>,
     gmap: Arc<Mutex<HashMap<String, Game>>>,
-    rng: Arc<Mutex<rand::rngs::StdRng>>,
+    _rng: Arc<Mutex<rand::rngs::StdRng>>,
 }
 
 #[tokio::main]
@@ -55,7 +51,7 @@ async fn main() {
     let shared = SharedData {
         tx: tx,
         gmap: Arc::new(Mutex::new(HashMap::new())),
-        rng: Arc::new(Mutex::new(rand::rngs::StdRng::from_entropy())),
+        _rng: Arc::new(Mutex::new(rand::rngs::StdRng::from_entropy())),
     };
 
     // Clone shared data for the timeout checker before moving it to the extension
@@ -66,6 +62,7 @@ async fn main() {
         .route("/", get(index))
         .route("/logs", get(logs))
         .route("/chain", post(smart_contract))
+        .route("/gamestate/:gameid/:fleet", get(game_state_handler))
         .layer(Extension(shared));
 
     // Run our app with hyper
@@ -448,7 +445,7 @@ fn handle_report(shared: &SharedData, input_data: &CommunicationData) -> String 
     // Update the next player to the player that was just reported
     game.next_player = Some(data.fleet.clone());
     game.next_report = None;
-
+    
     // Send a message about the successful report
     let msg = format!(
         "{} reported {} at position {} in game {}",
@@ -682,12 +679,40 @@ fn handle_win(shared: &SharedData, input_data: &CommunicationData) -> String {
     }
 }
 
+#[derive(Serialize)]
+struct GameState {
+    next_player: Option<String>,
+    next_report: Option<String>,
+    first_shot_fired: bool,
+}
+
+// Add new handler
+fn handle_game_state(shared: &SharedData, gameid: &str, fleet: &str) -> Result<GameState, String> {
+    let gmap = shared.gmap.lock().unwrap();
+    
+    let game = match gmap.get(gameid) {
+        Some(game) => game,
+        None => return Err("Game not found".to_string()),
+    };
+    
+    // Verify player is in the game
+    if !game.pmap.contains_key(fleet) {
+        return Err("Player not in game".to_string());
+    }
+    
+    Ok(GameState {
+        next_player: game.next_player.clone(),
+        next_report: game.next_report.clone(),
+        first_shot_fired: game.first_shot_fired,
+    })
+}
+
 async fn check_victory_timeouts(shared: &SharedData) {
     let mut gmap = shared.gmap.lock().unwrap();
     let mut games_to_remove = Vec::new();
     
     for (gameid, game) in gmap.iter_mut() {
-        if let Some((first_claimant, first_claim_time)) = &game.first_victory_claim {
+        if let Some((_first_claimant, first_claim_time)) = &game.first_victory_claim {
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -727,5 +752,19 @@ async fn check_victory_timeouts(shared: &SharedData) {
     // Remove ended games
     for gameid in games_to_remove {
         gmap.remove(&gameid);
+    }
+}
+
+// Add this handler function after the other handlers
+async fn game_state_handler(
+    Extension(shared): Extension<SharedData>,
+    Path((gameid, fleet)): Path<(String, String)>,
+) -> impl IntoResponse {
+    match handle_game_state(&shared, &gameid, &fleet) {
+        Ok(game_state) => Json(game_state).into_response(),
+        Err(error) => (
+            axum::http::StatusCode::BAD_REQUEST,
+            error
+        ).into_response(),
     }
 }
